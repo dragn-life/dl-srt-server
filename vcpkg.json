@@ -1,0 +1,6 @@
+{
+  "dependencies" : [ {
+    "name" : "libsrt",
+    "version>=" : "1.5.3#3"
+  } ]
+}
