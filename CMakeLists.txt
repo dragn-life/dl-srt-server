@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.29)
-project(msp_srt_server)
+project(dl_srt_server VERSION 0.0.1)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -13,8 +13,10 @@ set(CRYPTO_LIB "${LIBRARY_DIR}/libcrypto.lib")
 # Include directors and libraries
 include_directories(${INCLUDE_DIR})
 
-add_executable(msp_srt_server main.cpp main.cpp)
+add_executable(dl_srt_server src/main.cpp
+        src/core/SRTServer.cpp
+        src/core/SRTServer.h)
 
 # Link libraries
-target_link_libraries(msp_srt_server ${SSL_LIB} ${CRYPTO_LIB} ${SRT_LIB} Ws2_32.lib)
+target_link_libraries(dl_srt_server ${SSL_LIB} ${CRYPTO_LIB} ${SRT_LIB} Ws2_32.lib)
 
