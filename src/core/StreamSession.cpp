@@ -23,9 +23,9 @@
 
 StreamSession::StreamSession(
     std::shared_ptr<StreamHandler> streamHandler,
-    DisconnectCallback onDisconnect)
-    : m_streamHandler(std::move(streamHandler)),
-      m_onDisconnect(std::move(onDisconnect)) {
+    DisconnectCallback onPublisherDisconnected)
+    : m_publisherHandler(std::move(streamHandler)),
+      m_onDisconnect(std::move(onPublisherDisconnected)) {
 }
 
 StreamSession::~StreamSession() {
@@ -47,7 +47,7 @@ void StreamSession::cleanupSession() {
             m_publisherThread.reset();
         }
 
-        m_streamHandler->disconnect();
+        m_publisherHandler->disconnect();
     } catch (const std::exception &e) {
         std::cerr << "Exception in StreamSession cleanup: " << e.what() << std::endl;
     }
@@ -56,7 +56,7 @@ void StreamSession::cleanupSession() {
 void StreamSession::addSubscriber(std::shared_ptr<StreamHandler> subscriber) {
     std::lock_guard<std::mutex> lock(m_subscribersMutex);
     m_subscribers.push_back(subscriber);
-    std::cout << "Added subscriber to stream " << m_streamHandler->getStreamId() << std::endl;
+    std::cout << "Added subscriber to stream " << m_publisherHandler->getStreamId() << std::endl;
 }
 
 void StreamSession::removeSubscriber(std::shared_ptr<StreamHandler> subscriber) {
@@ -69,7 +69,7 @@ void StreamSession::removeSubscriber(std::shared_ptr<StreamHandler> subscriber) 
 }
 
 void StreamSession::removeAllSubscribers() {
-    std::cout << "Removing all subscribers from stream " << m_streamHandler->getStreamId() << std::endl;
+    std::cout << "Removing all subscribers from stream " << m_publisherHandler->getStreamId() << std::endl;
     std::lock_guard<std::mutex> lock(m_subscribersMutex);
     for (auto &subscriber: m_subscribers) {
         subscriber->disconnect();
@@ -79,7 +79,7 @@ void StreamSession::removeAllSubscribers() {
 
 bool StreamSession::startPublishing() {
     if (m_running.exchange(true)) {
-        std::cerr << "Already publishing stream " << m_streamHandler->getStreamId() << std::endl;
+        std::cerr << "Already publishing stream " << m_publisherHandler->getStreamId() << std::endl;
         return false;
     }
 
@@ -97,17 +97,17 @@ void StreamSession::publisherThread() {
             break;
         }
 
-        int bytesReceived = m_streamHandler->receive(buffer.data(), BUFFER_SIZE);
+        int bytesReceived = m_publisherHandler->receive(buffer.data(), BUFFER_SIZE);
         if (bytesReceived == STREAM_ERROR) {
             if (!m_running.load(std::memory_order_acquire)) {
                 break;
             }
-            std::cerr << "Failed to receive data from publisher: " << m_streamHandler->getLastErrorMessage() <<
+            std::cerr << "Failed to receive data from publisher: " << m_publisherHandler->getLastErrorMessage() <<
                     std::endl;
 
             // Notify the disconnect handler
             if (m_onDisconnect) {
-                m_onDisconnect(m_streamHandler->getStreamId());
+                m_onDisconnect(m_publisherHandler);
             }
             break;
         }
@@ -130,7 +130,7 @@ void StreamSession::publisherThread() {
             }
             int bytesSent = subscriber->send(buffer.data(), bytesReceived);
             if (bytesSent == STREAM_ERROR) {
-                std::cerr << "Failed to send data to subscriber: " << m_streamHandler->getLastErrorMessage() <<
+                std::cerr << "Failed to send data to subscriber: " << subscriber->getLastErrorMessage() <<
                         std::endl;
                 failedSubscribers.push_back(subscriber);
             }

@@ -36,6 +36,19 @@ void MockSRTHandler::expectReceivingData(const char *data, int len) {
             ));
 }
 
+void MockSRTHandler::expectReceivingDataDisconnects() {
+    EXPECT_CALL(*this, receive(testing::_, testing::_))
+            .WillRepeatedly(testing::DoAll(
+                testing::Invoke([](char *buffer, int bufferLen) {
+                    // Simulate receiving some data
+                    memcpy(buffer, nullptr, -1);
+                    return -1;
+                }),
+                testing::Return(-1)
+            ));
+}
+
+
 void MockSRTHandler::expectSendingData(const char *expectedData, int expectedLen) {
     EXPECT_CALL(*this, send(testing::_, testing::_))
             .WillRepeatedly(testing::DoAll(

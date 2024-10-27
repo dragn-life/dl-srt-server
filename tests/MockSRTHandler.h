@@ -34,6 +34,7 @@ public:
     MOCK_METHOD(bool, disconnect, (), (override));
 
     void expectReceivingData(const char *data, int len);
+    void expectReceivingDataDisconnects();
     void expectSendingData(const char *data, int len);
 };
 

@@ -77,6 +77,7 @@ if (BUILD_TESTS)
             tests/MockSRTHandler.cpp
             tests/MockSRTHandler.h
             tests/StreamSessionTest.cpp
+            tests/StreamManagerTest.cpp
     )
 
     target_link_libraries(dl_srt_server_tests

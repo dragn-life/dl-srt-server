@@ -22,7 +22,6 @@
 
 #include <functional>
 #include <mutex>
-#include <string>
 #include <thread>
 #include <vector>
 
@@ -31,17 +30,17 @@
 
 class StreamSession {
 public:
-    using DisconnectCallback = std::function<void(const std::string &)>;
+    using DisconnectCallback = std::function<void(const std::shared_ptr<StreamHandler> connection)>;
 
     explicit StreamSession(
         std::shared_ptr<StreamHandler> streamHandler,
-        DisconnectCallback onDisconnect
+        DisconnectCallback onPublisherDisconnected
     );
 
     ~StreamSession();
 
     // Getters
-    std::shared_ptr<StreamHandler> getStreamHandler() const { return m_streamHandler; }
+    std::shared_ptr<StreamHandler> getStreamHandler() const { return m_publisherHandler; }
 
     // Add/remove subscribers
     void addSubscriber(std::shared_ptr<StreamHandler> subscriber);
@@ -67,7 +66,7 @@ protected:
 private:
     void publisherThread();
 
-    std::shared_ptr<StreamHandler> m_streamHandler;
+    std::shared_ptr<StreamHandler> m_publisherHandler;
     DisconnectCallback m_onDisconnect;
 
     std::atomic<bool> m_running{false};

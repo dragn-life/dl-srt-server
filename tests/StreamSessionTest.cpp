@@ -64,7 +64,7 @@ protected:
 };
 
 TEST_F(StreamSessionTest, AddSubscriberSuccess) {
-    auto onDisconnect = [](const std::string &) {
+    auto onDisconnect = [](const std::shared_ptr<StreamHandler> connection) {
     };
     StreamSessionTestHelper session(publisherHandler, onDisconnect);
 
@@ -80,7 +80,7 @@ TEST_F(StreamSessionTest, AddSubscriberSuccess) {
 }
 
 TEST_F(StreamSessionTest, RemoveSubscriberSuccess) {
-    auto onDisconnect = [](const std::string &) {
+    auto onDisconnect = [](const std::shared_ptr<StreamHandler> connection) {
     };
     StreamSessionTestHelper session(publisherHandler, onDisconnect);
 
@@ -96,7 +96,7 @@ TEST_F(StreamSessionTest, RemoveSubscriberSuccess) {
 }
 
 TEST_F(StreamSessionTest, PublisherShutdownCleansUpThreads) {
-    auto onDisconnect = [](const std::string &) {
+    auto onDisconnect = [](const std::shared_ptr<StreamHandler> connection) {
     };
 
     publisherHandler->expectReceivingData("test data", 9);
@@ -132,7 +132,7 @@ TEST_F(StreamSessionTest, PublisherShutdownCleansUpThreads) {
 }
 
 TEST_F(StreamSessionTest, PublisherShutdownCleansUpSubscribers) {
-    auto onDisconnect = [](const std::string &) {
+    auto onDisconnect = [](const std::shared_ptr<StreamHandler> connection) {
     };
 
     publisherHandler->expectReceivingData("test data", 9);
@@ -172,7 +172,7 @@ TEST_F(StreamSessionTest, PublisherShutdownCleansUpSubscribers) {
 }
 
 TEST_F(StreamSessionTest, SubscribersReceivesData) {
-    auto onDisconnect = [](const std::string &) {
+    auto onDisconnect = [](const std::shared_ptr<StreamHandler> connection) {
     };
 
     StreamSessionTestHelper session(publisherHandler, onDisconnect);

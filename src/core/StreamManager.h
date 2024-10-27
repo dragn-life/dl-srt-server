@@ -32,20 +32,25 @@ public:
     ~StreamManager();
 
     // Stream management
-    bool onPublisherConnected(std::shared_ptr<StreamHandler> publisher);
+    bool onPublisherConnected(std::shared_ptr<StreamHandler> publisherHandler);
 
     bool onSubscriberConnected(std::shared_ptr<StreamHandler> subscriber);
 
-    void removeSession(std::shared_ptr<StreamHandler> connection);
-    void removeStream(const std::string &streamId);
+    void removePublishingStream(std::shared_ptr<StreamHandler> connection);
 
     // Stream validation
     bool validateStreamId(const std::string &streamId);
 
+protected:
+    std::mutex &getSessionsMutex() { return m_sessionsMutex; }
+
+    std::unordered_map<std::string, std::shared_ptr<StreamSession> > &getSessionsByStreamId() {
+        return m_sessionsByStreamId;
+    }
+
 private:
     std::mutex m_sessionsMutex;
-    std::unordered_map<std::string, std::shared_ptr<StreamSession>> m_sessionsByStreamId;
-    std::unordered_map<std::shared_ptr<StreamHandler>, std::shared_ptr<StreamSession>> m_sessionsByConnection;
+    std::unordered_map<std::string, std::shared_ptr<StreamSession> > m_sessionsByStreamId;
 };
 
 
