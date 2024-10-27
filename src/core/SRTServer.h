@@ -20,9 +20,7 @@
 #ifndef SRT_SERVER_H
 #define SRT_SERVER_H
 
-#include <srt/srt.h>
-#include <string>
-#include <vector>
+#include "StreamManager.h"
 #include <atomic>
 #include <thread>
 
@@ -43,32 +41,24 @@ public:
     void stop();
 
 private:
-    // Main server threads
-    void handleIncomingStreams();
+    void handleConnections(SRTSOCKET listener, bool isPublisher);
 
-    void handleOutgoingStreams();
-
-    // Helper methods
     bool initializeSrt();
 
     SRTSOCKET createSocket(int port, bool isListener);
 
-    void closeSocket(SRTSOCKET &socket);
-
     // Server state
-    std::atomic<bool> m_running;
-    SRTSOCKET m_input_socket;
-    SRTSOCKET m_output_socket;
-    std::vector<SRTSOCKET> m_output_clients;
+    std::atomic<bool> m_running{false};
+    SRTSOCKET m_publisherSocket;
+    SRTSOCKET m_subscriberSocket;
 
-    // Threads
-    std::thread m_input_thread;
-    std::thread m_output_thread;
+    std::unique_ptr<StreamManager> m_streamManager;
+    std::unique_ptr<std::thread> m_publisherThread;
+    std::unique_ptr<std::thread> m_subscriberThread;
 
     // TODO: Move to configuration file
-    static constexpr int INPUT_PORT = 5500;
-    static constexpr int OUTPUT_PORT = 6000;
-    static constexpr int BUFFER_SIZE = 1456; // SRT default packet size
+    static constexpr int PUBLISHER_PORT = 5500;
+    static constexpr int SUBSCRIBER_PORT = 6000;
     static constexpr int BACKLOG = 10;
 };
 

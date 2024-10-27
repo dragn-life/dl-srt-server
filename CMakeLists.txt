@@ -13,9 +13,12 @@ set(CRYPTO_LIB "${LIBRARY_DIR}/libcrypto.lib")
 # Include directors and libraries
 include_directories(${INCLUDE_DIR})
 
-add_executable(dl_srt_server src/main.cpp
+add_executable(dl_srt_server
+        src/main.cpp
         src/core/SRTServer.cpp
-        src/core/SRTServer.h)
+        src/core/StreamSession.cpp
+        src/core/StreamManager.cpp
+)
 
 # Link libraries
 target_link_libraries(dl_srt_server ${SSL_LIB} ${CRYPTO_LIB} ${SRT_LIB} Ws2_32.lib)

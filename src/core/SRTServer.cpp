@@ -22,14 +22,13 @@
 
 
 SRTServer::SRTServer()
-    : m_running(false)
-      , m_input_socket(SRT_INVALID_SOCK)
-      , m_output_socket(SRT_INVALID_SOCK) {
+    : m_streamManager(std::make_unique<StreamManager>()) {
 }
 
 SRTServer::~SRTServer() {
     stop();
 }
+
 
 bool SRTServer::initialize() {
     if (!initializeSrt()) {
@@ -37,22 +36,22 @@ bool SRTServer::initialize() {
         return false;
     }
 
-    m_input_socket = createSocket(INPUT_PORT, true);
-    if (m_input_socket == SRT_INVALID_SOCK) {
-        std::cerr << "Failed to create input socket" << std::endl;
+    m_publisherSocket = createSocket(PUBLISHER_PORT, true);
+    if (m_publisherSocket == SRT_INVALID_SOCK) {
+        std::cerr << "Failed to create publisher socket" << std::endl;
         return false;
     }
 
-    m_output_socket = createSocket(OUTPUT_PORT, true);
-    if (m_output_socket == SRT_INVALID_SOCK) {
-        std::cerr << "Failed to create output socket" << std::endl;
-        closeSocket(m_input_socket);
+    m_subscriberSocket = createSocket(SUBSCRIBER_PORT, true);
+    if (m_subscriberSocket == SRT_INVALID_SOCK) {
+        std::cerr << "Failed to create subscriber socket" << std::endl;
+        srt_close(m_publisherSocket);
         return false;
     }
 
     std::cout << "SRT Server initialized" << std::endl;
-    std::cout << "Input port: " << INPUT_PORT << std::endl;
-    std::cout << "Output port: " << OUTPUT_PORT << std::endl;
+    std::cout << "Publisher port: " << PUBLISHER_PORT << std::endl;
+    std::cout << "Subscriber port: " << SUBSCRIBER_PORT << std::endl;
 
     return true;
 }
@@ -63,14 +62,10 @@ bool SRTServer::start() {
         return false;
     }
 
-    try {
-        m_input_thread = std::thread(&SRTServer::handleIncomingStreams, this);
-        m_output_thread = std::thread(&SRTServer::handleOutgoingStreams, this);
-    } catch (...) {
-        // If thread creation fails, reset the running flag
-        m_running.store(false);
-        throw;
-    }
+    m_publisherThread = std::make_unique<std::thread>(&SRTServer::handleConnections, this,
+                                                      m_publisherSocket, true);
+    m_subscriberThread = std::make_unique<std::thread>(&SRTServer::handleConnections, this,
+                                                       m_subscriberSocket, false);
 
     return true;
 }
@@ -80,31 +75,48 @@ void SRTServer::stop() {
         return;
     }
 
-    // Close all client connections
-    for (auto &client: m_output_clients) {
-        closeSocket(client);
+    srt_close(m_publisherSocket);
+    srt_close(m_subscriberSocket);
+
+    if (m_publisherThread && m_publisherThread->joinable()) {
+        m_publisherThread->join();
+    }
+    if (m_subscriberThread && m_subscriberThread->joinable()) {
+        m_subscriberThread->join();
     }
 
-    m_output_clients.clear();
-
-    // Close server sockets
-    closeSocket(m_input_socket);
-    closeSocket(m_output_socket);
-
-    // Wait for threads to finish
-    if (m_input_thread.joinable()) {
-        m_input_thread.join();
-    }
-
-    if (m_output_thread.joinable()) {
-        m_output_thread.join();
-    }
-
+    m_streamManager.reset();
     srt_cleanup();
 }
 
+void SRTServer::handleConnections(SRTSOCKET listener, bool isPublisher) {
+    while (m_running.load(std::memory_order_acquire)) {
+        SRTSOCKET clientSocket = srt_accept(listener, nullptr, nullptr);
+        if (clientSocket == SRT_INVALID_SOCK) {
+            std::cerr << "Failed to accept incoming connection: " << srt_getlasterror_str() << std::endl;
+            continue;
+        }
+
+        std::string streamId = m_streamManager->extractStreamId(clientSocket);
+        if (!m_streamManager->validateStreamId(streamId)) {
+            std::cerr << "Invalid stream ID: " << streamId << std::endl;
+            srt_close(clientSocket);
+            continue;
+        }
+
+        bool success = isPublisher
+                           ? m_streamManager->addPublisher(clientSocket, streamId)
+                           : m_streamManager->addSubscriber(clientSocket, streamId);
+
+        if (!success) {
+            std::cerr << "Failed to add client to stream manager" << std::endl;
+            srt_close(clientSocket);
+        }
+    }
+}
+
 bool SRTServer::initializeSrt() {
-    if (srt_startup() < 0) {
+    if (srt_startup() == SRT_ERROR) {
         std::cerr << "Failed to initialize SRT" << std::endl;
         return false;
     }
@@ -147,60 +159,3 @@ SRTSOCKET SRTServer::createSocket(int port, bool isListener) {
 
     return sock;
 }
-
-void SRTServer::closeSocket(SRTSOCKET &sock) {
-    if (sock != SRT_INVALID_SOCK) {
-        srt_close(sock);
-        sock = SRT_INVALID_SOCK;
-    }
-}
-
-void SRTServer::handleIncomingStreams() {
-    std::vector<char> buffer(BUFFER_SIZE);
-
-    while (m_running) {
-        SRTSOCKET clientSocket = srt_accept(m_input_socket, nullptr, nullptr);
-        if (clientSocket == SRT_INVALID_SOCK) {
-            std::cerr << "Failed to accept incoming connection: " << srt_getlasterror_str() << std::endl;
-            continue;
-        }
-
-        std::cout << "Accepted incoming connection" << std::endl;
-
-        // Redistribute to all output clients
-        for (auto it = m_output_clients.begin(); it != m_output_clients.end();) {
-            int bytesReceived = srt_recv(clientSocket, buffer.data(), BUFFER_SIZE);
-            if (bytesReceived == SRT_ERROR) {
-                std::cerr << "Failed to receive data from client: " << srt_getlasterror_str() << std::endl;
-                break;
-            }
-
-            // Redistribute to all output clients
-            for (auto it = m_output_clients.begin(); it != m_output_clients.end();) {
-                int bytesSent = srt_send(*it, buffer.data(), bytesReceived);
-                if (bytesSent == SRT_ERROR) {
-                    std::cerr << "Failed to send data to client: " << srt_getlasterror_str() << std::endl;
-                    closeSocket(*it);
-                    it = m_output_clients.erase(it);
-                } else {
-                    ++it;
-                }
-            }
-        }
-        closeSocket(clientSocket);
-    }
-}
-
-void SRTServer::handleOutgoingStreams() {
-    while (m_running) {
-        SRTSOCKET clientSocket = srt_accept(m_output_socket, nullptr, nullptr);
-        if (clientSocket == SRT_INVALID_SOCK) {
-            std::cerr << "Failed to accept outgoing connection: " << srt_getlasterror_str() << std::endl;
-            continue;
-        }
-
-        std::cout << "Accepted outgoing connection" << std::endl;
-        m_output_clients.push_back(clientSocket);
-    }
-}
-
