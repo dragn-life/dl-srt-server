@@ -74,6 +74,8 @@ if (BUILD_TESTS)
 
     # Add the tests
     add_executable(dl_srt_server_tests
+            tests/MockSRTHandler.cpp
+            tests/MockSRTHandler.h
             tests/StreamSessionTest.cpp
     )
 

@@ -23,13 +23,8 @@
 
 #include <core/StreamSession.h>
 
-class MockSRTHandler : public SRTHandler {
-public:
-    MOCK_METHOD(std::string, getStreamId, (), (const, override));
-    MOCK_METHOD(int, receive, (char *, int), (override));
-    MOCK_METHOD(int, send, (const char *, int), (override));
-    MOCK_METHOD(bool, disconnect, (), (override));
-};
+#include "MockSRTHandler.h"
+
 
 class StreamSessionTestHelper : public StreamSession {
 public:
@@ -55,29 +50,25 @@ public:
 
 class StreamSessionTest : public ::testing::Test {
 protected:
+    std::shared_ptr<MockSRTHandler> publisherHandler;
+    std::shared_ptr<MockSRTHandler> subscriberHandler;
+
+    
     void SetUp() override {
+        publisherHandler = std::make_shared<MockSRTHandler>("test-stream-id");
+        subscriberHandler = std::make_shared<MockSRTHandler>("test-stream-id");
     }
 
     void TearDown() override {
-    }
-
-    std::shared_ptr<MockSRTHandler> createMockSRTHandler(std::string streamId) {
-        auto mockSRTHandler = std::make_shared<MockSRTHandler>();
-        EXPECT_CALL(*mockSRTHandler, getStreamId())
-                .WillRepeatedly(testing::Return(streamId));
-        return mockSRTHandler;
     }
 };
 
 TEST_F(StreamSessionTest, AddSubscriberSuccess) {
     auto onDisconnect = [](const std::string &) {
     };
-    std::shared_ptr<MockSRTHandler> publisherConnection = createMockSRTHandler("test-stream-id");
-    StreamSessionTestHelper session(publisherConnection, onDisconnect);
+    StreamSessionTestHelper session(publisherHandler, onDisconnect);
 
-    std::shared_ptr<MockSRTHandler> subscriberConnection = createMockSRTHandler("test-stream-id");
-
-    session.addSubscriber(subscriberConnection);
+    session.addSubscriber(subscriberHandler);
 
     // Verify that the subscriber was added
     std::vector<std::shared_ptr<StreamHandler> > subscribers; {
@@ -85,19 +76,16 @@ TEST_F(StreamSessionTest, AddSubscriberSuccess) {
         subscribers = session.getSubscribers();
     }
     EXPECT_EQ(subscribers.size(), 1);
-    EXPECT_EQ(subscribers[0], subscriberConnection);
+    EXPECT_EQ(subscribers[0], subscriberHandler);
 }
 
 TEST_F(StreamSessionTest, RemoveSubscriberSuccess) {
     auto onDisconnect = [](const std::string &) {
     };
-    std::shared_ptr<MockSRTHandler> publisherConnection = createMockSRTHandler("test-stream-id");
-    StreamSessionTestHelper session(publisherConnection, onDisconnect);
+    StreamSessionTestHelper session(publisherHandler, onDisconnect);
 
-    std::shared_ptr<MockSRTHandler> subscriberConnection = createMockSRTHandler("test-stream-id");
-
-    session.addSubscriber(subscriberConnection);
-    session.removeSubscriber(subscriberConnection);
+    session.addSubscriber(subscriberHandler);
+    session.removeSubscriber(subscriberHandler);
 
     // Verify that the subscriber was removed
     std::vector<std::shared_ptr<StreamHandler> > subscribers; {
@@ -110,22 +98,12 @@ TEST_F(StreamSessionTest, RemoveSubscriberSuccess) {
 TEST_F(StreamSessionTest, PublisherShutdownCleansUpThreads) {
     auto onDisconnect = [](const std::string &) {
     };
-    std::shared_ptr<MockSRTHandler> publisherConnection = createMockSRTHandler("test-stream-id");
-    // Expect some SRT calls during normal operation
-    EXPECT_CALL(*publisherConnection, receive(testing::_, testing::_))
-            .WillRepeatedly(testing::DoAll(
-                testing::Invoke([](char *buffer, int len) {
-                    // Simulate receiving some data
-                    const char testData[] = "test data";
-                    memcpy(buffer, testData, strlen(testData));
-                    return strlen(testData);
-                }),
-                testing::Return(9) // Length of "test data"
-            ));
 
-    EXPECT_CALL(*publisherConnection, disconnect()).Times(1);
+    publisherHandler->expectReceivingData("test data", 9);
 
-    StreamSessionTestHelper session(publisherConnection, onDisconnect);
+    EXPECT_CALL(*publisherHandler, disconnect()).Times(1);
+
+    StreamSessionTestHelper session(publisherHandler, onDisconnect);
 
     EXPECT_TRUE(session.startPublishing());
 
@@ -156,20 +134,10 @@ TEST_F(StreamSessionTest, PublisherShutdownCleansUpThreads) {
 TEST_F(StreamSessionTest, PublisherShutdownCleansUpSubscribers) {
     auto onDisconnect = [](const std::string &) {
     };
-    std::shared_ptr<MockSRTHandler> publisherConnection = createMockSRTHandler("test-stream-id");
-    // Expect some SRT calls during normal operation
-    EXPECT_CALL(*publisherConnection, receive(testing::_, testing::_))
-            .WillRepeatedly(testing::DoAll(
-                testing::Invoke([](char *buffer, int len) {
-                    // Simulate receiving some data
-                    const char testData[] = "test data";
-                    memcpy(buffer, testData, strlen(testData));
-                    return strlen(testData);
-                }),
-                testing::Return(9) // Length of "test data"
-            ));
 
-    StreamSessionTestHelper session(publisherConnection, onDisconnect);
+    publisherHandler->expectReceivingData("test data", 9);
+
+    StreamSessionTestHelper session(publisherHandler, onDisconnect);
 
     EXPECT_TRUE(session.startPublishing());
 
@@ -179,11 +147,10 @@ TEST_F(StreamSessionTest, PublisherShutdownCleansUpSubscribers) {
     // Verify Session is running
     EXPECT_TRUE(session.getRunning());
 
-    std::shared_ptr<MockSRTHandler> subscriberConnection = createMockSRTHandler("test-stream-id");
-    session.addSubscriber(subscriberConnection);
+    session.addSubscriber(subscriberHandler);
 
-    EXPECT_CALL(*publisherConnection, disconnect()).Times(1);
-    EXPECT_CALL(*subscriberConnection, disconnect()).Times(1);
+    EXPECT_CALL(*publisherHandler, disconnect()).Times(1);
+    EXPECT_CALL(*subscriberHandler, disconnect()).Times(1);
 
     // Verify that the subscriber was added
     std::vector<std::shared_ptr<StreamHandler> > subscribers; {
@@ -191,7 +158,7 @@ TEST_F(StreamSessionTest, PublisherShutdownCleansUpSubscribers) {
         subscribers = session.getSubscribers();
     }
     EXPECT_EQ(subscribers.size(), 1);
-    EXPECT_EQ(subscribers[0], subscriberConnection);
+    EXPECT_EQ(subscribers[0], subscriberHandler);
 
     session.cleanupSession();
 
@@ -207,46 +174,24 @@ TEST_F(StreamSessionTest, PublisherShutdownCleansUpSubscribers) {
 TEST_F(StreamSessionTest, SubscribersReceivesData) {
     auto onDisconnect = [](const std::string &) {
     };
-    std::shared_ptr<MockSRTHandler> publisherConnection = createMockSRTHandler("test-stream-id");
-    StreamSessionTestHelper session(publisherConnection, onDisconnect);
+
+    StreamSessionTestHelper session(publisherHandler, onDisconnect);
 
     const char testData[] = "some test data";
     const char testDataSend[] = "some test data";
 
-    // Data to publish
-    EXPECT_CALL(*publisherConnection, receive(testing::_, testing::_))
-            .WillRepeatedly(testing::DoAll(
-                testing::Invoke([&testData](char *buffer, int len) {
-                    // Simulate receiving some data
-                    memcpy(buffer, testData, strlen(testData));
-                    return strlen(testData);
-                }),
-                testing::Return(strlen(testData))
-            ));
+    publisherHandler->expectReceivingData(testData, strlen(testData));
+    subscriberHandler->expectSendingData(testDataSend, strlen(testDataSend));
 
     EXPECT_TRUE(session.startPublishing());
 
-
-    std::shared_ptr<MockSRTHandler> subscriberConnection = createMockSRTHandler("test-stream-id");
-
-    EXPECT_CALL(*subscriberConnection, send(testing::_, testing::_))
-            .WillRepeatedly(testing::DoAll(
-                testing::Invoke([&testDataSend](const char *buffer, int len) {
-                    // Verify that the subscriber received the data
-                    EXPECT_EQ(len, strlen(testDataSend));
-                    EXPECT_EQ(memcmp(buffer, testDataSend, len), 0);
-                    return len;
-                }),
-                testing::Return(strlen(testDataSend))
-            ));
-
-    session.addSubscriber(subscriberConnection);
+    session.addSubscriber(subscriberHandler);
 
     // Wait for data to be sent and received
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-    EXPECT_CALL(*publisherConnection, disconnect()).Times(1);
-    EXPECT_CALL(*subscriberConnection, disconnect()).Times(1);
+    EXPECT_CALL(*publisherHandler, disconnect()).Times(1);
+    EXPECT_CALL(*subscriberHandler, disconnect()).Times(1);
 
     session.cleanupSession();
 }
