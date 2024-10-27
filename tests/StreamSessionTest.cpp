@@ -43,8 +43,8 @@ public:
         return StreamSession::getSubscribers();
     }
 
-    void cleanupSession() {
-        StreamSession::cleanupSession();
+    std::atomic<bool> &getCleanupDone() {
+        return StreamSession::getCleanupDone();
     }
 };
 
@@ -53,7 +53,7 @@ protected:
     std::shared_ptr<MockSRTHandler> publisherHandler;
     std::shared_ptr<MockSRTHandler> subscriberHandler;
 
-    
+
     void SetUp() override {
         publisherHandler = std::make_shared<MockSRTHandler>("test-stream-id");
         subscriberHandler = std::make_shared<MockSRTHandler>("test-stream-id");
@@ -160,10 +160,14 @@ TEST_F(StreamSessionTest, PublisherShutdownCleansUpSubscribers) {
     EXPECT_EQ(subscribers.size(), 1);
     EXPECT_EQ(subscribers[0], subscriberHandler);
 
+    EXPECT_FALSE(session.getCleanupDone());
     session.cleanupSession();
+    session.waitForCleanup();
+    EXPECT_TRUE(session.getCleanupDone());
 
     // Verify that the subscriber was removed
     subscribers.clear();
+
     {
         std::lock_guard<std::mutex> lock(session.getSubscribersMutex());
         subscribers = session.getSubscribers();
@@ -192,6 +196,23 @@ TEST_F(StreamSessionTest, SubscribersReceivesData) {
 
     EXPECT_CALL(*publisherHandler, disconnect()).Times(1);
     EXPECT_CALL(*subscriberHandler, disconnect()).Times(1);
+
+    session.cleanupSession();
+}
+
+TEST_F(StreamSessionTest, OnDisconnectCallbackIsCalled) {
+    testing::MockFunction<void(const std::shared_ptr<StreamHandler>)> mockOnDisconnectCallback;
+
+    StreamSessionTestHelper session(publisherHandler, mockOnDisconnectCallback.AsStdFunction());
+
+    EXPECT_CALL(mockOnDisconnectCallback, Call(testing::_)).Times(1);
+
+    publisherHandler->expectReceivingDataDisconnects();
+
+    EXPECT_TRUE(session.startPublishing());
+
+    // Wait for data to be sent and received
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
     session.cleanupSession();
 }

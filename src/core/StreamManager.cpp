@@ -54,12 +54,22 @@ bool StreamManager::onPublisherConnected(std::shared_ptr<StreamHandler> publishe
 }
 
 void StreamManager::removePublishingStream(std::shared_ptr<StreamHandler> publisherHandler) {
-    std::lock_guard<std::mutex> lock(m_sessionsMutex);
+    std::cout << "Removing publisher from stream " << publisherHandler->getStreamId() << std::endl;
+    std::shared_ptr<StreamSession> sessionToCleanup; {
+        std::lock_guard<std::mutex> lock(m_sessionsMutex);
 
-    auto it = m_sessionsByStreamId.find(publisherHandler->getStreamId());
-    if (it != m_sessionsByStreamId.end()) {
-        auto sessionToCleanup = it->second;
-        m_sessionsByStreamId.erase(it);
+        auto it = m_sessionsByStreamId.find(publisherHandler->getStreamId());
+        if (it != m_sessionsByStreamId.end()) {
+            sessionToCleanup = it->second;
+            m_sessionsByStreamId.erase(it);
+        }
+    }
+
+    std::cout << "Removed publisher from stream " << publisherHandler->getStreamId() << std::endl;
+    // Wait for cleanup to complete
+    if (sessionToCleanup) {
+        sessionToCleanup->cleanupSession();
+        sessionToCleanup->waitForCleanup();
     }
 }
 

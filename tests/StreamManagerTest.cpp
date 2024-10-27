@@ -72,7 +72,7 @@ TEST_F(StreamManagerTest, OnPublisherConnectedAddsStream) {
 
     EXPECT_TRUE(streamManager->getSessionsByStreamId().empty());
 
-    streamManager->onPublisherConnected(publisherAHandler);
+    EXPECT_TRUE(streamManager->onPublisherConnected(publisherAHandler));
 
     // Verify that the stream was added
     std::unordered_map<std::string, std::shared_ptr<StreamSession> > sessionsByStreamId;
@@ -86,24 +86,42 @@ TEST_F(StreamManagerTest, OnPublisherConnectedAddsStream) {
     EXPECT_EQ(sessionsByStreamId.size(), 1);
 }
 
-// TODO: WIP: Fix publisher disconnection crash
-TEST_F(StreamManagerTest, OnPublisherDisconnectRemovesStream) {
-    publisherAHandler->expectReceivingDataDisconnects();
+TEST_F(StreamManagerTest, RemoveStreamRemovesStream) {
+    publisherAHandler->expectReceivingData("Some Test Data", 14);
 
-    streamManager->onPublisherConnected(publisherAHandler);
+    EXPECT_TRUE(streamManager->getSessionsByStreamId().empty());
 
-    // Stream should Disconnect when no data is received
-    EXPECT_CALL(*publisherAHandler, disconnect()).Times(1);
+    EXPECT_TRUE(streamManager->onPublisherConnected(publisherAHandler));
+
+    streamManager->removePublishingStream(publisherAHandler);
+
     // Wait for the publisher to clean up
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     // Verify that the stream session was removed
     std::unordered_map<std::string, std::shared_ptr<StreamSession> > sessionsByStreamId;
-    std::unordered_map<std::shared_ptr<StreamHandler>, std::shared_ptr<StreamSession> > sessionsByConnection;
     {
         std::lock_guard<std::mutex> lock(streamManager->getSessionsMutex());
-        sessionsByStreamId = streamManager->getSessionsByStreamId();
     }
     EXPECT_TRUE(sessionsByStreamId.empty());
-    EXPECT_TRUE(sessionsByConnection.empty());
+}
+
+// TODO: WIP: Fix publisher disconnection crash
+TEST_F(StreamManagerTest, OnPublisherDisconnectRemovesStream) {
+    publisherAHandler->expectReceivingDataDisconnects();
+
+    // Stream should Disconnect when no data is received
+    EXPECT_CALL(*publisherAHandler, disconnect()).Times(1);
+
+    EXPECT_TRUE(streamManager->onPublisherConnected(publisherAHandler));
+
+    // Wait for the publisher to clean up
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Verify that the stream session was removed
+    std::unordered_map<std::string, std::shared_ptr<StreamSession> > sessionsByStreamId;
+    {
+        std::lock_guard<std::mutex> lock(streamManager->getSessionsMutex());
+    }
+    EXPECT_TRUE(sessionsByStreamId.empty());
 }

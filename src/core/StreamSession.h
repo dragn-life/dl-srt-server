@@ -30,7 +30,7 @@
 
 class StreamSession {
 public:
-    using DisconnectCallback = std::function<void(const std::shared_ptr<StreamHandler> connection)>;
+    using DisconnectCallback = std::function<void(std::shared_ptr<StreamHandler> connection)>;
 
     explicit StreamSession(
         std::shared_ptr<StreamHandler> streamHandler,
@@ -38,6 +38,10 @@ public:
     );
 
     ~StreamSession();
+
+    void cleanupSession();
+
+    void waitForCleanup();
 
     // Getters
     std::shared_ptr<StreamHandler> getStreamHandler() const { return m_publisherHandler; }
@@ -57,11 +61,11 @@ protected:
     std::thread::id getPublisherThreadId() const { return m_publisherThreadId; }
 
     std::lock_guard<std::mutex> getSubscribersMutex() { return std::lock_guard<std::mutex>(m_subscribersMutex); }
-    const std::vector<std::shared_ptr<StreamHandler>> &getSubscribers() const { return m_subscribers; }
+    const std::vector<std::shared_ptr<StreamHandler> > &getSubscribers() const { return m_subscribers; }
+
+    std::atomic<bool> &getCleanupDone() { return m_cleanupDone; }
 
     void removeAllSubscribers();
-
-    void cleanupSession();
 
 private:
     void publisherThread();
@@ -76,7 +80,11 @@ private:
     std::thread::id m_publisherThreadId;
 
     std::mutex m_subscribersMutex;
-    std::vector<std::shared_ptr<StreamHandler>> m_subscribers;
+    std::vector<std::shared_ptr<StreamHandler> > m_subscribers;
+
+    std::mutex m_cleanupMutex;
+    std::condition_variable m_cleanupCV;
+    std::atomic<bool> m_cleanupDone{false};
 
     // TODO: Move to configuration file
     static constexpr int BUFFER_SIZE = 1456;

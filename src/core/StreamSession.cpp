@@ -42,15 +42,32 @@ void StreamSession::cleanupSession() {
         removeAllSubscribers();
 
         // Only try to join if we're not in the publisher thread
-        if (m_publisherThread && m_publisherThread->joinable() && m_publisherThreadId != std::this_thread::get_id()) {
-            m_publisherThread->join();
+        if (m_publisherThread && m_publisherThread->joinable()) {
+            if (m_publisherThreadId != std::this_thread::get_id()) {
+                m_publisherThread->join();
+            }
             m_publisherThread.reset();
         }
 
         m_publisherHandler->disconnect();
+
+        // Sleep for 100ms to allow the publisher thread to stop
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // Signal cleanup is done
+        m_cleanupDone = true;
+        m_cleanupCV.notify_all();
     } catch (const std::exception &e) {
         std::cerr << "Exception in StreamSession cleanup: " << e.what() << std::endl;
+        m_cleanupDone = true;
+        m_cleanupCV.notify_all();
     }
+}
+
+void StreamSession::waitForCleanup() {
+    std::unique_lock<std::mutex> lock(m_cleanupMutex);
+    m_cleanupCV.wait(lock, [this] {
+        return m_cleanupDone.load();
+    });
 }
 
 void StreamSession::addSubscriber(std::shared_ptr<StreamHandler> subscriber) {
@@ -97,14 +114,24 @@ void StreamSession::publisherThread() {
             break;
         }
 
-        int bytesReceived = m_publisherHandler->receive(buffer.data(), BUFFER_SIZE);
-        if (bytesReceived == STREAM_ERROR) {
-            if (!m_running.load(std::memory_order_acquire)) {
+        int bytesReceived = 0;
+        try {
+            bytesReceived = m_publisherHandler->receive(buffer.data(), BUFFER_SIZE);
+            if (bytesReceived == STREAM_ERROR) {
+                if (!m_running.load(std::memory_order_acquire)) {
+                    break;
+                }
+                std::cerr << "Failed to receive data from publisher: " << m_publisherHandler->getLastErrorMessage() <<
+                        std::endl;
+
+                // Notify the disconnect handler
+                if (m_onDisconnect) {
+                    m_onDisconnect(m_publisherHandler);
+                }
                 break;
             }
-            std::cerr << "Failed to receive data from publisher: " << m_publisherHandler->getLastErrorMessage() <<
-                    std::endl;
-
+        } catch (const std::exception &e) {
+            std::cerr << "Failed to receive Data: " << e.what() << std::endl;
             // Notify the disconnect handler
             if (m_onDisconnect) {
                 m_onDisconnect(m_publisherHandler);

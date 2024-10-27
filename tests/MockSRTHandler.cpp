@@ -38,10 +38,11 @@ void MockSRTHandler::expectReceivingData(const char *data, int len) {
 
 void MockSRTHandler::expectReceivingDataDisconnects() {
     EXPECT_CALL(*this, receive(testing::_, testing::_))
-            .WillRepeatedly(testing::DoAll(
+            .WillOnce(testing::DoAll(
                 testing::Invoke([](char *buffer, int bufferLen) {
+                    std::vector<char> data(bufferLen);
                     // Simulate receiving some data
-                    memcpy(buffer, nullptr, -1);
+                    memcpy(buffer, data.data(), bufferLen);
                     return -1;
                 }),
                 testing::Return(-1)
