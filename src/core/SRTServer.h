@@ -23,6 +23,7 @@
 #include "StreamManager.h"
 #include <atomic>
 #include <thread>
+#include "utils/SRTHandler.h"
 
 
 class SRTServer {
@@ -45,7 +46,7 @@ private:
 
     bool initializeSrt();
 
-    SRTSOCKET createSocket(int port, bool isListener);
+    SRTSOCKET createSocket(int port);
 
     // Server state
     std::atomic<bool> m_running{false};

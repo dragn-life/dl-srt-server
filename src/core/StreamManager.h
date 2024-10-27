@@ -23,6 +23,7 @@
 #include <unordered_map>
 
 #include "StreamSession.h"
+#include "utils/StreamHandler.h"
 
 class StreamManager {
 public:
@@ -31,22 +32,20 @@ public:
     ~StreamManager();
 
     // Stream management
-    bool addPublisher(SRTSOCKET socket, const std::string &streamId);
+    bool onPublisherConnected(std::shared_ptr<StreamHandler> publisher);
 
-    bool addSubscriber(SRTSOCKET socket, const std::string &streamId);
+    bool onSubscriberConnected(std::shared_ptr<StreamHandler> subscriber);
 
-    void removeSession(SRTSOCKET socket);
+    void removeSession(std::shared_ptr<StreamHandler> connection);
     void removeStream(const std::string &streamId);
 
     // Stream validation
     bool validateStreamId(const std::string &streamId);
 
-    std::string extractStreamId(SRTSOCKET socket);
-
 private:
     std::mutex m_sessionsMutex;
-    std::unordered_map<std::string, std::shared_ptr<StreamSession> > m_sessionsByStreamId;
-    std::unordered_map<SRTSOCKET, std::shared_ptr<StreamSession> > m_sessionsBySocket;
+    std::unordered_map<std::string, std::shared_ptr<StreamSession>> m_sessionsByStreamId;
+    std::unordered_map<std::shared_ptr<StreamHandler>, std::shared_ptr<StreamSession>> m_sessionsByConnection;
 };
 
 

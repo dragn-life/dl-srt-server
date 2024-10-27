@@ -22,53 +22,62 @@
 
 #include <functional>
 #include <mutex>
-#include <srt/srt.h>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "utils/StreamHandler.h"
 
 
 class StreamSession {
 public:
     using DisconnectCallback = std::function<void(const std::string &)>;
 
-    StreamSession(SRTSOCKET socket, const std::string &streamId, DisconnectCallback onDisconnect);
+    explicit StreamSession(
+        std::shared_ptr<StreamHandler> streamHandler,
+        DisconnectCallback onDisconnect
+    );
 
     ~StreamSession();
 
     // Getters
-    SRTSOCKET getSocket() const { return m_socket; }
-    std::string getStreamId() const { return m_streamId; }
+    std::shared_ptr<StreamHandler> getStreamHandler() const { return m_streamHandler; }
 
     // Add/remove subscribers
-    bool addSubscriber(SRTSOCKET socket);
+    void addSubscriber(std::shared_ptr<StreamHandler> subscriber);
 
-    void removeSubscriber(SRTSOCKET socket);
+    void removeSubscriber(std::shared_ptr<StreamHandler> subscriber);
+
+    bool startPublishing();
+
+protected:
+    std::atomic<bool> &getRunning() { return m_running; }
+    std::atomic<bool> &getIsDisconnecting() { return m_isDisconnecting; }
+
+    std::unique_ptr<std::thread> &getPublisherThread() { return m_publisherThread; }
+    std::thread::id getPublisherThreadId() const { return m_publisherThreadId; }
+
+    std::lock_guard<std::mutex> getSubscribersMutex() { return std::lock_guard<std::mutex>(m_subscribersMutex); }
+    const std::vector<std::shared_ptr<StreamHandler>> &getSubscribers() const { return m_subscribers; }
 
     void removeAllSubscribers();
 
-    // Start/stop publishing
-    bool startPublishing();
-
-    void stopPublishing();
+    void cleanupSession();
 
 private:
     void publisherThread();
 
-    void closeSocket(SRTSOCKET socket);
-
-    void handleDisconnect();
-
-    const SRTSOCKET m_socket;
-    const std::string m_streamId;
+    std::shared_ptr<StreamHandler> m_streamHandler;
     DisconnectCallback m_onDisconnect;
 
     std::atomic<bool> m_running{false};
+    std::atomic<bool> m_isDisconnecting{false};
+
     std::unique_ptr<std::thread> m_publisherThread;
+    std::thread::id m_publisherThreadId;
 
     std::mutex m_subscribersMutex;
-    std::vector<SRTSOCKET> m_subscribers;
-    std::atomic<bool> m_isDisconnecting{false};
+    std::vector<std::shared_ptr<StreamHandler>> m_subscribers;
 
     // TODO: Move to configuration file
     static constexpr int BUFFER_SIZE = 1456;

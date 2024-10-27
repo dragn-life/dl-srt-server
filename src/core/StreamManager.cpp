@@ -19,16 +19,18 @@
 
 #include "StreamManager.h"
 
+#include <iostream>
+
 StreamManager::StreamManager() = default;
 
 StreamManager::~StreamManager() = default;
 
-bool StreamManager::addPublisher(SRTSOCKET socket, const std::string &streamId) {
+bool StreamManager::onPublisherConnected(std::shared_ptr<StreamHandler> publisher) {
     std::lock_guard<std::mutex> lock(m_sessionsMutex);
 
     // Check if Stream ID already exists
-    if (m_sessionsByStreamId.find(streamId) != m_sessionsByStreamId.end()) {
-        std::cerr << "Stream ID " << streamId << " already exists" << std::endl;
+    if (m_sessionsByStreamId.find(publisher->getStreamId()) != m_sessionsByStreamId.end()) {
+        std::cerr << "Stream ID " << publisher->getStreamId() << " already exists" << std::endl;
         return false;
     }
 
@@ -37,89 +39,95 @@ bool StreamManager::addPublisher(SRTSOCKET socket, const std::string &streamId) 
         removeStream(streamId);
     };
 
-    auto session = std::make_shared<StreamSession>(socket, streamId, onDisconnect);
-    m_sessionsByStreamId[streamId] = session;
-    m_sessionsBySocket[socket] = session;
+    auto session = std::make_shared<StreamSession>(publisher, onDisconnect);
+    m_sessionsByStreamId[publisher->getStreamId()] = session;
+    m_sessionsByConnection[publisher] = session;
 
     // Start publishing
     if (!session->startPublishing()) {
         // If already publishing, remove the session
-        m_sessionsByStreamId.erase(streamId);
-        m_sessionsBySocket.erase(socket);
+        m_sessionsByStreamId.erase(publisher->getStreamId());
+        m_sessionsByConnection.erase(publisher);
         return false;
     }
 
-    std::cout << "Added publisher to stream " << streamId << std::endl;
+    std::cout << "Added publisher to stream " << publisher->getStreamId() << std::endl;
     return true;
 }
 
-bool StreamManager::addSubscriber(SRTSOCKET socket, const std::string &streamId) {
+bool StreamManager::onSubscriberConnected(std::shared_ptr<StreamHandler> subscriber) {
     std::lock_guard<std::mutex> lock(m_sessionsMutex);
 
-    auto it = m_sessionsByStreamId.find(streamId);
+    auto it = m_sessionsByStreamId.find(subscriber->getStreamId());
     if (it == m_sessionsByStreamId.end()) {
-        std::cerr << "Stream Session for ID " << streamId << " not found" << std::endl;
+        std::cerr << "Stream Session for ID " << subscriber->getStreamId() << " not found" << std::endl;
         return false;
     }
     auto streamSession = it->second;
 
-    if (!streamSession->addSubscriber(socket)) {
-        return false;
-    }
-
-    m_sessionsBySocket[socket] = streamSession;
+    streamSession->addSubscriber(subscriber);
+    m_sessionsByConnection[subscriber] = streamSession;
     return true;
 }
 
-void StreamManager::removeSession(SRTSOCKET socket) {
-    std::lock_guard<std::mutex> lock(m_sessionsMutex);
+void StreamManager::removeSession(std::shared_ptr<StreamHandler> connection) {
+    std::shared_ptr<StreamSession> sessionToCleanup;
 
-    auto it = m_sessionsBySocket.find(socket);
-    if (it == m_sessionsBySocket.end()) {
-        return;
+    bool isPublisher = false;
+    std::string streamId; {
+        std::lock_guard<std::mutex> lock(m_sessionsMutex);
+
+        auto it = m_sessionsByConnection.find(connection);
+        if (it != m_sessionsByConnection.end()) {
+            auto connectionToCleanup = it->first;
+            sessionToCleanup = it->second;
+            streamId = connection->getStreamId();
+            isPublisher = connectionToCleanup == connection;
+
+            // Remove the connection mapping
+            m_sessionsByConnection.erase(it);
+
+            // If this is a publisher, remove the entire stream map
+            if (isPublisher) {
+                m_sessionsByStreamId.erase(streamId);
+            }
+        }
     }
-    auto streamSession = it->second;
-    const std::string &streamId = streamSession->getStreamId();
 
-    if (streamSession->getSocket() == socket) {
-        // This is a publisher - remove the entire stream
-        m_sessionsByStreamId.erase(streamId);
-        m_sessionsBySocket.erase(socket);
-        std::cout << "Publisher disconnected, removed stream " << streamId << std::endl;
-    } else {
-        // This is a subscriber
-        streamSession->removeSubscriber(socket);
-        m_sessionsBySocket.erase(socket);
-        std::cout << "Subscriber disconnected from stream " << streamId << std::endl;
+    // Cleanup outside the lock
+    if (sessionToCleanup) {
+        if (isPublisher) {
+            std::cout << "Publisher disconnected, removed stream " << streamId << std::endl;
+        } else {
+            // This is a subscriber
+            sessionToCleanup->removeSubscriber(connection);
+            std::cout << "Subscriber disconnected from stream " << streamId << std::endl;
+        }
     }
 }
 
 void StreamManager::removeStream(const std::string &streamId) {
-    std::lock_guard<std::mutex> lock(m_sessionsMutex);
+    std::shared_ptr<StreamSession> sessionToCleanup; {
+        std::lock_guard<std::mutex> lock(m_sessionsMutex);
 
-    auto it = m_sessionsByStreamId.find(streamId);
-    if (it == m_sessionsByStreamId.end()) {
-        return;
-    }
-    auto streamSession = it->second;
+        auto it = m_sessionsByStreamId.find(streamId);
+        if (it != m_sessionsByStreamId.end()) {
+            sessionToCleanup = it->second;
 
-    // First remove all subscribers
-    streamSession->removeAllSubscribers();
+            // Remove all connection mappings for this session
+            auto connection_it = m_sessionsByConnection.begin();
+            while (connection_it != m_sessionsByConnection.end()) {
+                if (connection_it->second == sessionToCleanup) {
+                    connection_it = m_sessionsByConnection.erase(connection_it);
+                } else {
+                    ++connection_it;
+                }
+            }
 
-    // Remove all socket mappings for this session
-    auto socket_it = m_sessionsBySocket.begin();
-    while (socket_it != m_sessionsBySocket.end()) {
-        if (socket_it->second == streamSession) {
-            socket_it = m_sessionsBySocket.erase(socket_it);
-        } else {
-            ++socket_it;
+            // Finally remove the session itself
+            m_sessionsByStreamId.erase(it);
         }
     }
-
-    // Finally remove the session itself
-    m_sessionsByStreamId.erase(it);
-
-    std::cout << "Removed stream " << streamId << std::endl;
 }
 
 bool StreamManager::validateStreamId(const std::string &streamId) {
@@ -129,15 +137,4 @@ bool StreamManager::validateStreamId(const std::string &streamId) {
     }
     // TODO: Validate stream ID via callback api
     return true;
-}
-
-std::string StreamManager::extractStreamId(SRTSOCKET socket) {
-    char streamId[512];
-    int streamIdLen = 512;
-
-    if (srt_getsockflag(socket, SRTO_STREAMID, &streamId, &streamIdLen) == SRT_ERROR) {
-        std::cerr << "Failed to extract stream ID from socket" << std::endl;
-        return "";
-    }
-    return std::string(streamId, streamIdLen);
 }

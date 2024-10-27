@@ -19,44 +19,67 @@
 
 #include "StreamSession.h"
 
-StreamSession::StreamSession(SRTSOCKET socket, const std::string &streamId, DisconnectCallback onDisconnect)
-    : m_socket(socket), m_streamId(streamId), m_onDisconnect(std::move(onDisconnect)) {
+#include <iostream>
+
+StreamSession::StreamSession(
+    std::shared_ptr<StreamHandler> streamHandler,
+    DisconnectCallback onDisconnect)
+    : m_streamHandler(std::move(streamHandler)),
+      m_onDisconnect(std::move(onDisconnect)) {
 }
 
 StreamSession::~StreamSession() {
-    m_isDisconnecting = true;
-    stopPublishing();
-    removeAllSubscribers();
-    closeSocket(m_socket);
+    cleanupSession();
 }
 
-bool StreamSession::addSubscriber(SRTSOCKET socket) {
+void StreamSession::cleanupSession() {
+    if (m_isDisconnecting.exchange(true)) {
+        return;
+    }
+    m_running = false;
+
+    try {
+        removeAllSubscribers();
+
+        // Only try to join if we're not in the publisher thread
+        if (m_publisherThread && m_publisherThread->joinable() && m_publisherThreadId != std::this_thread::get_id()) {
+            m_publisherThread->join();
+            m_publisherThread.reset();
+        }
+
+        m_streamHandler->disconnect();
+    } catch (const std::exception &e) {
+        std::cerr << "Exception in StreamSession cleanup: " << e.what() << std::endl;
+    }
+}
+
+void StreamSession::addSubscriber(std::shared_ptr<StreamHandler> subscriber) {
     std::lock_guard<std::mutex> lock(m_subscribersMutex);
-    m_subscribers.push_back(socket);
-    std::cout << "Added subscriber to stream " << m_streamId << std::endl;
-    return true;
+    m_subscribers.push_back(subscriber);
+    std::cout << "Added subscriber to stream " << m_streamHandler->getStreamId() << std::endl;
 }
 
-void StreamSession::removeSubscriber(SRTSOCKET socket) {
+void StreamSession::removeSubscriber(std::shared_ptr<StreamHandler> subscriber) {
     std::lock_guard<std::mutex> lock(m_subscribersMutex);
     m_subscribers.erase(
-        std::remove(m_subscribers.begin(), m_subscribers.end(), socket),
+        std::remove(m_subscribers.begin(), m_subscribers.end(), subscriber),
         m_subscribers.end()
     );
-    closeSocket(socket);
+    subscriber->disconnect();
 }
 
 void StreamSession::removeAllSubscribers() {
+    std::cout << "Removing all subscribers from stream " << m_streamHandler->getStreamId() << std::endl;
     std::lock_guard<std::mutex> lock(m_subscribersMutex);
     for (auto &subscriber: m_subscribers) {
-        closeSocket(subscriber);
+        subscriber->disconnect();
     }
     m_subscribers.clear();
 }
 
 bool StreamSession::startPublishing() {
     if (m_running.exchange(true)) {
-        std::cerr << "Already publishing stream " << m_streamId << std::endl;
+        std::cerr << "Already publishing stream " << m_streamHandler->getStreamId() << std::endl;
         return false;
     }
 
@@ -64,15 +87,8 @@ bool StreamSession::startPublishing() {
     return true;
 }
 
-void StreamSession::stopPublishing() {
-    if (m_running.exchange(false)) {
-        if (m_publisherThread && m_publisherThread->joinable()) {
-            m_publisherThread->join();
-        }
-    }
-}
-
 void StreamSession::publisherThread() {
+    m_publisherThreadId = std::this_thread::get_id();
     std::vector<char> buffer(BUFFER_SIZE);
 
     while (m_running.load(std::memory_order_relaxed)) {
@@ -81,18 +97,23 @@ void StreamSession::publisherThread() {
             break;
         }
 
-        int bytesReceived = srt_recv(m_socket, buffer.data(), BUFFER_SIZE);
-        if (bytesReceived == SRT_ERROR) {
+        int bytesReceived = m_streamHandler->receive(buffer.data(), BUFFER_SIZE);
+        if (bytesReceived == STREAM_ERROR) {
             if (!m_running.load(std::memory_order_acquire)) {
                 break;
             }
-            std::cerr << "Failed to receive data from publisher: " << srt_getlasterror_str() << std::endl;
-            handleDisconnect();
+            std::cerr << "Failed to receive data from publisher: " << m_streamHandler->getLastErrorMessage() <<
+                    std::endl;
+
+            // Notify the disconnect handler
+            if (m_onDisconnect) {
+                m_onDisconnect(m_streamHandler->getStreamId());
+            }
             break;
         }
 
         // Make a copy of subscribers to avoid a long lock
-        std::vector<SRTSOCKET> currentSubscribers; {
+        std::vector<std::shared_ptr<StreamHandler> > currentSubscribers; {
             std::lock_guard<std::mutex> lock(m_subscribersMutex);
             currentSubscribers = m_subscribers;
         }
@@ -102,14 +123,15 @@ void StreamSession::publisherThread() {
             continue;
         }
 
-        std::vector<SRTSOCKET> failedSubscribers;
+        std::vector<std::shared_ptr<StreamHandler> > failedSubscribers;
         for (const auto &subscriber: currentSubscribers) {
             if (m_isDisconnecting.load(std::memory_order_acquire)) {
                 break;
             }
-            int bytesSent = srt_send(subscriber, buffer.data(), bytesReceived);
-            if (bytesSent == SRT_ERROR) {
-                std::cerr << "Failed to send data to subscriber: " << srt_getlasterror_str() << std::endl;
+            int bytesSent = subscriber->send(buffer.data(), bytesReceived);
+            if (bytesSent == STREAM_ERROR) {
+                std::cerr << "Failed to send data to subscriber: " << m_streamHandler->getLastErrorMessage() <<
+                        std::endl;
                 failedSubscribers.push_back(subscriber);
             }
         }
@@ -118,32 +140,12 @@ void StreamSession::publisherThread() {
         if (!failedSubscribers.empty()) {
             std::lock_guard<std::mutex> lock(m_subscribersMutex);
             for (const auto &failedSubscriber: failedSubscribers) {
-                closeSocket(failedSubscriber);
+                failedSubscriber->disconnect();
                 m_subscribers.erase(
                     std::remove(m_subscribers.begin(), m_subscribers.end(), failedSubscriber),
                     m_subscribers.end()
                 );
             }
         }
-    }
-}
-
-void StreamSession::handleDisconnect() {
-    try {
-        if (!m_isDisconnecting.exchange(true)) {
-            stopPublishing();
-            removeAllSubscribers();
-            if (m_onDisconnect) {
-                m_onDisconnect(m_streamId);
-            }
-        }
-    } catch (const std::exception &e) {
-        std::cerr << "Exception in disconnect handler: " << e.what() << std::endl;
-    }
-}
-
-void StreamSession::closeSocket(SRTSOCKET socket) {
-    if (socket != SRT_INVALID_SOCK) {
-        srt_close(socket);
     }
 }
