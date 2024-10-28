@@ -22,7 +22,7 @@
 
 
 SRTServer::SRTServer()
-    : m_streamManager(std::make_unique<StreamManager>()) {
+    : m_streamManager(std::make_shared<StreamManager>()) {
 }
 
 SRTServer::~SRTServer() {

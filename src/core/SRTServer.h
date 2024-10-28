@@ -53,7 +53,7 @@ private:
     SRTSOCKET m_publisherSocket;
     SRTSOCKET m_subscriberSocket;
 
-    std::unique_ptr<StreamManager> m_streamManager;
+    std::shared_ptr<StreamManager> m_streamManager;
     std::unique_ptr<std::thread> m_publisherThread;
     std::unique_ptr<std::thread> m_subscriberThread;
 
