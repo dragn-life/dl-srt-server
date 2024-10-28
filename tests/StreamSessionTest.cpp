@@ -26,6 +26,11 @@
 #include "MockSRTHandler.h"
 
 
+class MockStreamEventListener : public StreamEventListener {
+public:
+    MOCK_METHOD(void, onStreamEvent, (const StreamEvent&), (override));
+};
+
 class StreamSessionTestHelper : public StreamSession {
 public:
     using StreamSession::StreamSession;
@@ -53,20 +58,20 @@ protected:
     std::shared_ptr<MockSRTHandler> publisherHandler;
     std::shared_ptr<MockSRTHandler> subscriberHandler;
 
-
     void SetUp() override {
         publisherHandler = std::make_shared<MockSRTHandler>("test-stream-id");
         subscriberHandler = std::make_shared<MockSRTHandler>("test-stream-id");
     }
 
     void TearDown() override {
+        publisherHandler.reset();
+        subscriberHandler.reset();
     }
 };
 
 TEST_F(StreamSessionTest, AddSubscriberSuccess) {
-    auto onDisconnect = [](const std::shared_ptr<StreamHandler> connection) {
-    };
-    StreamSessionTestHelper session(publisherHandler, onDisconnect);
+    auto mockEventListener = std::make_shared<MockStreamEventListener>();
+    StreamSessionTestHelper session(publisherHandler, mockEventListener);
 
     session.addSubscriber(subscriberHandler);
 
@@ -80,9 +85,8 @@ TEST_F(StreamSessionTest, AddSubscriberSuccess) {
 }
 
 TEST_F(StreamSessionTest, RemoveSubscriberSuccess) {
-    auto onDisconnect = [](const std::shared_ptr<StreamHandler> connection) {
-    };
-    StreamSessionTestHelper session(publisherHandler, onDisconnect);
+    auto mockEventListener = std::make_shared<MockStreamEventListener>();
+    StreamSessionTestHelper session(publisherHandler, mockEventListener);
 
     session.addSubscriber(subscriberHandler);
     session.removeSubscriber(subscriberHandler);
@@ -96,14 +100,12 @@ TEST_F(StreamSessionTest, RemoveSubscriberSuccess) {
 }
 
 TEST_F(StreamSessionTest, PublisherShutdownCleansUpThreads) {
-    auto onDisconnect = [](const std::shared_ptr<StreamHandler> connection) {
-    };
-
+    auto mockEventListener = std::make_shared<MockStreamEventListener>();
     publisherHandler->expectReceivingData("test data", 9);
 
     EXPECT_CALL(*publisherHandler, disconnect()).Times(1);
 
-    StreamSessionTestHelper session(publisherHandler, onDisconnect);
+    StreamSessionTestHelper session(publisherHandler, mockEventListener);
 
     EXPECT_TRUE(session.startPublishing());
 
@@ -132,12 +134,10 @@ TEST_F(StreamSessionTest, PublisherShutdownCleansUpThreads) {
 }
 
 TEST_F(StreamSessionTest, PublisherShutdownCleansUpSubscribers) {
-    auto onDisconnect = [](const std::shared_ptr<StreamHandler> connection) {
-    };
-
+    auto mockEventListener = std::make_shared<MockStreamEventListener>();
     publisherHandler->expectReceivingData("test data", 9);
 
-    StreamSessionTestHelper session(publisherHandler, onDisconnect);
+    StreamSessionTestHelper session(publisherHandler, mockEventListener);
 
     EXPECT_TRUE(session.startPublishing());
 
@@ -166,9 +166,7 @@ TEST_F(StreamSessionTest, PublisherShutdownCleansUpSubscribers) {
     EXPECT_TRUE(session.getCleanupDone());
 
     // Verify that the subscriber was removed
-    subscribers.clear();
-
-    {
+    subscribers.clear(); {
         std::lock_guard<std::mutex> lock(session.getSubscribersMutex());
         subscribers = session.getSubscribers();
     }
@@ -176,10 +174,8 @@ TEST_F(StreamSessionTest, PublisherShutdownCleansUpSubscribers) {
 }
 
 TEST_F(StreamSessionTest, SubscribersReceivesData) {
-    auto onDisconnect = [](const std::shared_ptr<StreamHandler> connection) {
-    };
-
-    StreamSessionTestHelper session(publisherHandler, onDisconnect);
+    auto mockEventListener = std::make_shared<MockStreamEventListener>();
+    StreamSessionTestHelper session(publisherHandler, mockEventListener);
 
     const char testData[] = "some test data";
     const char testDataSend[] = "some test data";
@@ -201,11 +197,14 @@ TEST_F(StreamSessionTest, SubscribersReceivesData) {
 }
 
 TEST_F(StreamSessionTest, OnDisconnectCallbackIsCalled) {
-    testing::MockFunction<void(const std::shared_ptr<StreamHandler>)> mockOnDisconnectCallback;
+    auto mockEventListener = std::make_shared<MockStreamEventListener>();
+    // Expect the disconnect event
+    EXPECT_CALL(*mockEventListener, onStreamEvent(testing::_)).Times(1);
 
-    StreamSessionTestHelper session(publisherHandler, mockOnDisconnectCallback.AsStdFunction());
-
-    EXPECT_CALL(mockOnDisconnectCallback, Call(testing::_)).Times(1);
+    StreamSessionTestHelper session(
+        publisherHandler,
+        std::weak_ptr<StreamEventListener>(mockEventListener)
+    );
 
     publisherHandler->expectReceivingDataDisconnects();
 

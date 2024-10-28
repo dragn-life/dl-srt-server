@@ -23,9 +23,9 @@
 
 StreamSession::StreamSession(
     std::shared_ptr<StreamHandler> streamHandler,
-    DisconnectCallback onPublisherDisconnected)
+    std::weak_ptr<StreamEventListener> eventListener)
     : m_publisherHandler(std::move(streamHandler)),
-      m_onDisconnect(std::move(onPublisherDisconnected)) {
+      m_eventListener(std::move(eventListener)) {
 }
 
 StreamSession::~StreamSession() {
@@ -104,6 +104,17 @@ bool StreamSession::startPublishing() {
     return true;
 }
 
+void StreamSession::notifyDisconnect() const {
+    if (auto listener = m_eventListener.lock()) {
+        StreamEvent event{
+            StreamEventType::PublisherDisconnected,
+            m_publisherHandler->getStreamId(),
+            m_publisherHandler,
+        };
+        listener->onStreamEvent(event);
+    }
+}
+
 void StreamSession::publisherThread() {
     m_publisherThreadId = std::this_thread::get_id();
     std::vector<char> buffer(BUFFER_SIZE);
@@ -124,18 +135,12 @@ void StreamSession::publisherThread() {
                 std::cerr << "Failed to receive data from publisher: " << m_publisherHandler->getLastErrorMessage() <<
                         std::endl;
 
-                // Notify the disconnect handler
-                if (m_onDisconnect) {
-                    m_onDisconnect(m_publisherHandler);
-                }
+                notifyDisconnect();
                 break;
             }
         } catch (const std::exception &e) {
             std::cerr << "Failed to receive Data: " << e.what() << std::endl;
-            // Notify the disconnect handler
-            if (m_onDisconnect) {
-                m_onDisconnect(m_publisherHandler);
-            }
+            notifyDisconnect();
             break;
         }
 

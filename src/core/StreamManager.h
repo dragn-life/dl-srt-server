@@ -25,7 +25,7 @@
 #include "StreamSession.h"
 #include "utils/StreamHandler.h"
 
-class StreamManager {
+class StreamManager : public StreamEventListener, public std::enable_shared_from_this<StreamManager> {
 public:
     StreamManager();
 
@@ -37,6 +37,8 @@ public:
     bool onSubscriberConnected(std::shared_ptr<StreamHandler> subscriber);
 
     void removePublishingStream(std::shared_ptr<StreamHandler> connection);
+
+    void onStreamEvent(const StreamEvent &event) override;
 
     // Stream validation
     bool validateStreamId(const std::string &streamId);

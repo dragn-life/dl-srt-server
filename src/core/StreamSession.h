@@ -20,21 +20,19 @@
 #ifndef STREAMSESSION_H
 #define STREAMSESSION_H
 
-#include <functional>
 #include <mutex>
 #include <thread>
 #include <vector>
 
+#include "utils/StreamEvents.h"
 #include "utils/StreamHandler.h"
 
 
 class StreamSession {
 public:
-    using DisconnectCallback = std::function<void(std::shared_ptr<StreamHandler> connection)>;
-
     explicit StreamSession(
         std::shared_ptr<StreamHandler> streamHandler,
-        DisconnectCallback onPublisherDisconnected
+        std::weak_ptr<StreamEventListener> eventListener
     );
 
     ~StreamSession();
@@ -70,8 +68,11 @@ protected:
 private:
     void publisherThread();
 
+    void notifyDisconnect() const;
+
     std::shared_ptr<StreamHandler> m_publisherHandler;
-    DisconnectCallback m_onDisconnect;
+
+    std::weak_ptr<StreamEventListener> m_eventListener;
 
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_isDisconnecting{false};
@@ -89,6 +90,4 @@ private:
     // TODO: Move to configuration file
     static constexpr int BUFFER_SIZE = 1456;
 };
-
-
 #endif //STREAMSESSION_H

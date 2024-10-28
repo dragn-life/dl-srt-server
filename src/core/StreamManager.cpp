@@ -34,12 +34,9 @@ bool StreamManager::onPublisherConnected(std::shared_ptr<StreamHandler> publishe
         return false;
     }
 
-    // Create a disconnect callback
-    auto onPublisherDisconnected = [this](const std::shared_ptr<StreamHandler> publisherHandler) {
-        removePublishingStream(publisherHandler);
-    };
-
-    auto session = std::make_shared<StreamSession>(publisherHandler, onPublisherDisconnected);
+    auto session = std::make_shared<StreamSession>(
+        publisherHandler,
+        std::weak_ptr<StreamEventListener>(shared_from_this()));
     m_sessionsByStreamId[publisherHandler->getStreamId()] = session;
 
     // Start publishing
@@ -85,6 +82,17 @@ bool StreamManager::onSubscriberConnected(std::shared_ptr<StreamHandler> subscri
 
     streamSession->addSubscriber(subscriber);
     return true;
+}
+
+void StreamManager::onStreamEvent(const StreamEvent &event) {
+    // Handle Stream Event on new thread
+    std::thread([this, event]() {
+        switch (event.type) {
+            case StreamEventType::PublisherDisconnected:
+                removePublishingStream(event.handler);
+                break;
+        }
+    }).detach();
 }
 
 bool StreamManager::validateStreamId(const std::string &streamId) {

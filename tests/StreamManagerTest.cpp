@@ -106,7 +106,6 @@ TEST_F(StreamManagerTest, RemoveStreamRemovesStream) {
     EXPECT_TRUE(sessionsByStreamId.empty());
 }
 
-// TODO: WIP: Fix publisher disconnection crash
 TEST_F(StreamManagerTest, OnPublisherDisconnectRemovesStream) {
     publisherAHandler->expectReceivingDataDisconnects();
 
@@ -115,7 +114,7 @@ TEST_F(StreamManagerTest, OnPublisherDisconnectRemovesStream) {
 
     EXPECT_TRUE(streamManager->onPublisherConnected(publisherAHandler));
 
-    // Wait for the publisher to clean up
+    // Wait for disconnect processing
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     // Verify that the stream session was removed
