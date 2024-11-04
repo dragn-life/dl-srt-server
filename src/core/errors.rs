@@ -17,17 +17,16 @@
  *
  */
 
-use tokio;
-use dl_srt_server::core::server::RelayServer;
+use thiserror::Error;
 
-#[tokio::main]
-async fn main() {
-  tracing_subscriber::fmt::init();
-  let server = RelayServer::new();
-
-  if let Err(e) = server.run().await {
-    eprintln!("Server Error: {}", e);
-  }
-
-  server.shutdown();
+#[derive(Error, Debug)]
+pub enum RelayError {
+  // TODO: Add SRT error
+  // #[error("SRT error: {0}")]
+  // SrtError(#[from] dl_srt_rust::Error),
+  #[error("Broadcast channel error")]
+  BroadcastError,
+  #[error("IO error: {0}")]
+  IoError(#[from] std::io::Error),
 }
+

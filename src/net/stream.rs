@@ -17,17 +17,10 @@
  *
  */
 
-use tokio;
-use dl_srt_server::core::server::RelayServer;
-
-#[tokio::main]
-async fn main() {
-  tracing_subscriber::fmt::init();
-  let server = RelayServer::new();
-
-  if let Err(e) = server.run().await {
-    eprintln!("Server Error: {}", e);
-  }
-
-  server.shutdown();
+#[derive(Debug, Clone)]
+pub struct StreamData {
+  pub data: Vec<u8>,
+  // TODO: Handle Stream ID
+  // pub stream_id: str,
+  pub timestamp: u64,
 }

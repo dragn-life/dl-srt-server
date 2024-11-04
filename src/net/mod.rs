@@ -17,17 +17,6 @@
  *
  */
 
-use tokio;
-use dl_srt_server::core::server::RelayServer;
-
-#[tokio::main]
-async fn main() {
-  tracing_subscriber::fmt::init();
-  let server = RelayServer::new();
-
-  if let Err(e) = server.run().await {
-    eprintln!("Server Error: {}", e);
-  }
-
-  server.shutdown();
-}
+pub mod stream;
+pub mod listener;
+pub mod connection;

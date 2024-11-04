@@ -17,17 +17,25 @@
  *
  */
 
-use tokio;
-use dl_srt_server::core::server::RelayServer;
-
-#[tokio::main]
-async fn main() {
-  tracing_subscriber::fmt::init();
-  let server = RelayServer::new();
-
-  if let Err(e) = server.run().await {
-    eprintln!("Server Error: {}", e);
-  }
-
-  server.shutdown();
+#[derive(Debug, Clone)]
+pub struct Settings {
+  pub input_stream_port: u16,
+  pub output_stream_port: u16,
+  pub buffer_size: usize,
+  pub max_connections: usize,
+  pub latency_ms: u32,
 }
+
+impl Default for Settings {
+  fn default() -> Self {
+    Self {
+      input_stream_port: 5500,
+      output_stream_port: 6000,
+      buffer_size: 1456, // Default SRT Buffer Size
+      max_connections: 100,
+      latency_ms: 20,
+    }
+  }
+}
+
+// TODO: Implement a way to load settings from a file or via Command line Arguments

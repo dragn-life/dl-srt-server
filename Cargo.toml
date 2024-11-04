@@ -7,3 +7,8 @@ edition = "2021"
 # dl-srt-rust = { git = "https://github.com/dragn-life/dl-srt-rust" }
 # For development, use the local path
 dl-srt-rust = { path = "../dl-srt-rust" }
+thiserror = "1.0.67"
+tokio = { version = "1.41.0", features = ["full"] }
+chrono = "0.4.38"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
