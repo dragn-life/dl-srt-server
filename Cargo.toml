@@ -1,0 +1,9 @@
+[package]
+name = "dl-srt-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# dl-srt-rust = { git = "https://github.com/dragn-life/dl-srt-rust" }
+# For development, use the local path
+dl-srt-rust = { path = "../dl-srt-rust" }
