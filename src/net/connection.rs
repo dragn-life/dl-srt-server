@@ -72,7 +72,7 @@ impl Connection {
           }
         }
         Err(e) => {
-          eprintln!("Input Stream Received Error: {:?}", e);
+          tracing::error!("Input Stream Received Error: {:?}", e);
           break;
         }
       }
@@ -97,7 +97,7 @@ impl Connection {
           }
         }
         Err(e) => {
-          eprintln!("Output Stream Receive Error: {:?}", e);
+          tracing::error!("Output Stream Receive Error: {:?}", e);
           break;
         }
       }

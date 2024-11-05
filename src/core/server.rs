@@ -44,9 +44,9 @@ impl RelayServer {
   }
 
   pub async fn run(&self) -> Result<(), RelayError> {
-    println!("Starting SRT relay server...");
-    println!("Incoming Streams Listening on: {}", self.settings.input_stream_port);
-    println!("Outgoing Streams Listening on: {}", self.settings.output_stream_port);
+    tracing::info!("Starting SRT relay server...");
+    tracing::info!("Incoming Streams Listening on: {}", self.settings.input_stream_port);
+    tracing::info!("Outgoing Streams Listening on: {}", self.settings.output_stream_port);
 
     dl_srt_rust::startup_srt()?;
 
@@ -59,14 +59,14 @@ impl RelayServer {
 
     tokio::select! {
       _ = tokio::signal::ctrl_c() => {
-        println!("Shutting down server...");
+        tracing::info!("Shutting down server...");
         self.running.store(false, Ordering::SeqCst);
       },
       _ = incoming_stream_handle => {
-        println!("Incoming stream listener has stopped");
+        tracing::info!("Incoming stream listener has stopped");
       },
       _ = outgoing_stream_handle => {
-        println!("Outgoing stream listener has stopped");
+        tracing::info!("Outgoing stream listener has stopped");
       }
     }
 

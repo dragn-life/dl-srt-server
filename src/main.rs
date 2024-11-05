@@ -26,7 +26,7 @@ async fn main() {
   let server = RelayServer::new();
 
   if let Err(e) = server.run().await {
-    eprintln!("Server Error: {}", e);
+    tracing::error!("Server Error: {}", e);
   }
 
   server.shutdown();

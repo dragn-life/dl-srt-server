@@ -43,7 +43,7 @@ impl SrtListener {
     socket.bind(port)?;
     socket.listen(2)?;
 
-    println!("Created {:?}, Listening on port: {port}", connection_type);
+    tracing::debug!("Created {:?}, Listening on port: {port}", connection_type);
 
     Ok(Self {
       socket: Arc::new(socket),
@@ -61,7 +61,7 @@ impl SrtListener {
 
     tokio::spawn(async move {
       if let Err(e) = listener.accept_connections(running, tx).await {
-        eprintln!("Error accepting connections: {:?}", e);
+        tracing::error!("Error accepting connections: {:?}", e);
       }
     })
   }
@@ -84,7 +84,7 @@ impl SrtListener {
       match self.socket.accept() {
         Ok(socket) => {
           // TODO: Get Peer IP address
-          println!("{:?} connected", self.connection_type);
+          tracing::info!("{:?} connected", self.connection_type);
 
           let connection = Connection::new(
             socket,
