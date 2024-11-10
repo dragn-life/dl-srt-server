@@ -25,11 +25,9 @@ use dl_srt_server::monitoring::init_monitoring;
 async fn main() {
   init_monitoring();
 
-  let server = RelayServer::new();
+  let mut server = RelayServer::new();
 
   if let Err(e) = server.run().await {
     tracing::error!("Server Error: {}", e);
   }
-
-  server.shutdown();
 }

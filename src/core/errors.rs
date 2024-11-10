@@ -21,7 +21,7 @@ use thiserror::Error;
 // TODO: WIP: Add SRT error, fine tune specific errors
 #[derive(Error, Debug)]
 pub enum RelayError {
-  // TODO: Add SRT error
+  // TODO: Add SRT errors / states (i.e.: Disconnected)
   // #[error("SRT error: {0}")]
   // SrtError(#[from] dl_srt_rust::Error),
   #[error("Broadcast channel error")]
