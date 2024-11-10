@@ -17,6 +17,6 @@
  *
  */
 
-pub mod stream;
-pub mod listener;
 pub mod connection;
+pub mod listener;
+pub mod stream;

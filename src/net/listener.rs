@@ -24,40 +24,40 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct SrtListener {
-    socket: Arc<SrtSocketConnection>,
+  socket: Arc<SrtSocketConnection>,
 }
 
 impl SrtListener {
-    pub fn new(port: u16) -> Result<Self, RelayError> {
-        let socket = SrtSocketConnection::new()?;
+  pub fn new(port: u16) -> Result<Self, RelayError> {
+    let socket = SrtSocketConnection::new()?;
 
-        socket.set_sock_opt(0, SrtOptRCVSYN, SrtOptionValue::Bool(true))?;
-        socket.set_sock_opt(0, SrtOptReuseAddr, SrtOptionValue::Bool(true))?;
+    socket.set_sock_opt(0, SrtOptRCVSYN, SrtOptionValue::Bool(true))?;
+    socket.set_sock_opt(0, SrtOptReuseAddr, SrtOptionValue::Bool(true))?;
 
-        if let Err(e) = socket.bind(port) {
-            tracing::error!("Failed to bind on port: {}", e);
-            return Err(RelayError::SocketBindError(port));
-        }
-        socket.listen(2)?;
-
-        Ok(Self {
-            socket: Arc::new(socket),
-        })
+    if let Err(e) = socket.bind(port) {
+      tracing::error!("Failed to bind on port: {}", e);
+      return Err(RelayError::SocketBindError(port));
     }
+    socket.listen(2)?;
 
-    // TODO: Implement blocking accept via spawning a thread with "isListening" flag or enum states
-    pub fn accept_connection(&self) -> Result<SrtSocketConnection, RelayError> {
-        match self.socket.accept() {
-            Ok(socket) => Ok(socket),
-            Err(e) => {
-                tracing::error!("Failed to accept connection: {}", e);
-                Err(RelayError::SocketAcceptError)
-            }
-        }
-    }
+    Ok(Self {
+      socket: Arc::new(socket),
+    })
+  }
 
-    // TODO: Implement "isDisconnected" flag or enum states
-    pub fn close(&self) {
-        self.socket.close();
+  // TODO: Implement blocking accept via spawning a thread with "isListening" flag or enum states
+  pub fn accept_connection(&self) -> Result<SrtSocketConnection, RelayError> {
+    match self.socket.accept() {
+      Ok(socket) => Ok(socket),
+      Err(e) => {
+        tracing::error!("Failed to accept connection: {}", e);
+        Err(RelayError::SocketAcceptError)
+      }
     }
+  }
+
+  // TODO: Implement "isDisconnected" flag or enum states
+  pub fn close(&self) {
+    self.socket.close();
+  }
 }

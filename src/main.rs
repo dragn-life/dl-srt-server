@@ -17,9 +17,9 @@
  *
  */
 
-use tokio;
 use dl_srt_server::core::server::RelayServer;
 use dl_srt_server::monitoring::init_monitoring;
+use tokio;
 
 #[tokio::main]
 async fn main() {

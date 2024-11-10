@@ -19,6 +19,6 @@
 
 pub mod config;
 pub mod core;
-pub mod net;
 pub mod monitoring;
+pub mod net;
 pub mod utils;

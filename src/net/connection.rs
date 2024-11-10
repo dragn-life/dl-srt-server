@@ -16,10 +16,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  */
+use crate::core::errors::RelayError;
+use dl_srt_rust::SrtSocketConnection;
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use crate::core::errors::RelayError;
-use dl_srt_rust::{SrtSocketConnection};
 
 #[derive(Debug, Clone, Copy)]
 pub enum ConnectionType {
@@ -43,12 +43,19 @@ pub struct StreamConnection {
 
 impl Display for StreamConnection {
   fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-    write!(f, "Stream ID: {}, Connection Type: {}, Socket Connection: {}", self.stream_id, self.connection_type, self.socket)
+    write!(
+      f,
+      "Stream ID: {}, Connection Type: {}, Socket Connection: {}",
+      self.stream_id, self.connection_type, self.socket
+    )
   }
 }
 
 impl StreamConnection {
-  pub fn new(socket: SrtSocketConnection, connection_type: ConnectionType) -> Result<Self, RelayError> {
+  pub fn new(
+    socket: SrtSocketConnection,
+    connection_type: ConnectionType,
+  ) -> Result<Self, RelayError> {
     // let stream_id = match socket.get_sock_flag(SrtOptStreamID) {
     //   Ok(SrtOptionValue::String(stream_id)) => stream_id,
     //   _ => {

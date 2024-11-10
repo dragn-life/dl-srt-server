@@ -35,4 +35,3 @@ pub enum RelayError {
   #[error("General Error")]
   GeneralError,
 }
-
