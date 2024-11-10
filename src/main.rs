@@ -19,10 +19,12 @@
 
 use tokio;
 use dl_srt_server::core::server::RelayServer;
+use dl_srt_server::monitoring::init_monitoring;
 
 #[tokio::main]
 async fn main() {
-  tracing_subscriber::fmt::init();
+  init_monitoring();
+
   let server = RelayServer::new();
 
   if let Err(e) = server.run().await {

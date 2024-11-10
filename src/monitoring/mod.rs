@@ -16,6 +16,14 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  */
+use tracing::Level;
 
-// TODO: Monitoring
-
+pub fn init_monitoring() {
+  tracing_subscriber::fmt()
+    .with_thread_ids(true)
+    .with_thread_names(true)
+    .with_file(true)
+    .with_line_number(true)
+    .with_max_level(Level::DEBUG)
+    .init();
+}

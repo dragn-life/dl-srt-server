@@ -16,9 +16,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  */
-
 use thiserror::Error;
 
+// TODO: WIP: Add SRT error, fine tune specific errors
 #[derive(Error, Debug)]
 pub enum RelayError {
   // TODO: Add SRT error
@@ -28,5 +28,11 @@ pub enum RelayError {
   BroadcastError,
   #[error("IO error: {0}")]
   IoError(#[from] std::io::Error),
+  #[error("Failed to bind on port: {0}")]
+  SocketBindError(u16),
+  #[error("Failed to accept connection")]
+  SocketAcceptError,
+  #[error("General Error")]
+  GeneralError,
 }
 
