@@ -17,7 +17,6 @@
  *
  */
 use crate::core::errors::RelayError;
-use dl_srt_rust::errors::SrtError;
 use dl_srt_rust::{SrtOptionValue, SrtSocketConnection, SrtSocketOptions};
 use std::fmt;
 use std::fmt::{Display, Formatter};
