@@ -17,7 +17,8 @@
  *
  */
 use crate::core::errors::RelayError;
-use dl_srt_rust::SrtSocketConnection;
+use dl_srt_rust::errors::SrtError;
+use dl_srt_rust::{SrtOptionValue, SrtSocketConnection, SrtSocketOptions};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
@@ -56,16 +57,19 @@ impl StreamConnection {
     socket: SrtSocketConnection,
     connection_type: ConnectionType,
   ) -> Result<Self, RelayError> {
-    // let stream_id = match socket.get_sock_flag(SrtOptStreamID) {
-    //   Ok(SrtOptionValue::String(stream_id)) => stream_id,
-    //   _ => {
-    //     tracing::error!("Failed to get stream id");
-    //     // Return fake stream id
-    //     // TODO: Fix this - this is a temporary fix, getting stream id failing atm
-    //     "abc".to_string()
-    //   }
-    // };
-    let stream_id = "abc".to_string();
+    tracing::debug!("{} stream connected", connection_type);
+    let stream_id = match socket.get_sock_flag(SrtSocketOptions::SrtOptStreamID) {
+      Ok(SrtOptionValue::String(stream_id)) => stream_id,
+      Ok(other) => {
+        tracing::error!("Failed to get stream id: Unexpected value: {:?}", other);
+        return Err(RelayError::GeneralError);
+      }
+      Err(e) => {
+        tracing::error!("Failed to get stream id: {}", e);
+        return Err(RelayError::SrtError(e));
+      }
+    };
+    tracing::debug!("{} Stream ID: {}", connection_type, stream_id);
     Ok(Self {
       socket,
       connection_type,
