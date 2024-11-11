@@ -36,7 +36,7 @@ impl SrtListener {
 
     if let Err(e) = socket.bind(port) {
       tracing::error!("Failed to bind on port: {}", e);
-      return Err(RelayError::SocketBindError(port));
+      return Err(RelayError::SrtError(e));
     }
     socket.listen(2)?;
 
@@ -51,13 +51,16 @@ impl SrtListener {
       Ok(socket) => Ok(socket),
       Err(e) => {
         tracing::error!("Failed to accept connection: {}", e);
-        Err(RelayError::SocketAcceptError)
+        Err(RelayError::SrtError(e))
       }
     }
   }
 
   // TODO: Implement "isDisconnected" flag or enum states
   pub fn close(&self) {
-    self.socket.close();
+    match self.socket.close() {
+      Ok(_) => (),
+      Err(e) => tracing::warn!("Failed to close listener: {}", e),
+    }
   }
 }

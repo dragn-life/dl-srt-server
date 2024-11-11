@@ -18,20 +18,12 @@
  */
 use thiserror::Error;
 
-// TODO: WIP: Add SRT error, fine tune specific errors
 #[derive(Error, Debug)]
 pub enum RelayError {
-  // TODO: Add SRT errors / states (i.e.: Disconnected)
-  // #[error("SRT error: {0}")]
-  // SrtError(#[from] dl_srt_rust::Error),
-  #[error("Broadcast channel error")]
-  BroadcastError,
+  #[error("SRT error: {0}")]
+  SrtError(#[from] dl_srt_rust::errors::SrtError),
   #[error("IO error: {0}")]
   IoError(#[from] std::io::Error),
-  #[error("Failed to bind on port: {0}")]
-  SocketBindError(u16),
-  #[error("Failed to accept connection")]
-  SocketAcceptError,
   #[error("General Error")]
   GeneralError,
 }
