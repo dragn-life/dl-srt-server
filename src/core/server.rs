@@ -28,7 +28,6 @@ use tokio::sync::{broadcast, RwLock};
 use tokio::task::JoinHandle;
 
 pub struct RelayServer {
-  settings: Settings,
   shutdown_tx: broadcast::Sender<()>,
   tasks: Vec<JoinHandle<()>>,
   // TODO: Handle blocking on tokio select for incoming and outgoing streams, tmp fix works
@@ -40,14 +39,10 @@ pub struct RelayServer {
 
 impl RelayServer {
   pub fn new() -> Self {
-    // TODO: Configure settings in main, pass in here (for possible cli args and/or settings file)
-    let settings = Settings::default();
-
     // Broadcast channel for shutdown signal
     let (shutdown_tx, _) = broadcast::channel(1);
 
     RelayServer {
-      settings,
       shutdown_tx,
       tasks: Vec::new(),
       srt_listeners: Vec::new(),
@@ -60,11 +55,11 @@ impl RelayServer {
     tracing::info!("Starting SRT relay server...");
     tracing::info!(
       "Incoming Streams Listening on: {}",
-      self.settings.input_stream_port
+      Settings::get().input_stream_port
     );
     tracing::info!(
       "Outgoing Streams Listening on: {}",
-      self.settings.output_stream_port
+      Settings::get().output_stream_port
     );
 
     dl_srt_rust::startup_srt()?;
@@ -114,7 +109,7 @@ impl RelayServer {
   fn listen_for_input_streams(&mut self) -> Result<JoinHandle<()>, RelayError> {
     let mut shutdown_rx = self.shutdown_tx.subscribe();
 
-    let listener = match SrtListener::new(self.settings.input_stream_port) {
+    let listener = match SrtListener::new(Settings::get().input_stream_port) {
       Ok(listener) => Arc::new(listener),
       Err(err) => {
         tracing::error!("Failed to create listener: {}", err);
@@ -184,7 +179,7 @@ impl RelayServer {
   fn listen_for_output_streams(&mut self) -> Result<JoinHandle<()>, RelayError> {
     let mut shutdown_rx = self.shutdown_tx.subscribe();
 
-    let listener = match SrtListener::new(self.settings.output_stream_port) {
+    let listener = match SrtListener::new(Settings::get().output_stream_port) {
       Ok(listener) => Arc::new(listener),
       Err(err) => {
         tracing::error!("Failed to create listener: {}", err);
@@ -253,7 +248,7 @@ impl RelayServer {
 
   fn start_relay_task(&self) -> Result<JoinHandle<()>, RelayError> {
     tracing::info!("Starting Relay Task...");
-    let buffer_size = self.settings.buffer_size;
+    let buffer_size = Settings::get().buffer_size;
     let in_connections = Arc::clone(&self.incoming_stream_connections);
     let out_connections = Arc::clone(&self.outgoing_stream_connections);
     let mut shutdown_rx = self.shutdown_tx.subscribe();

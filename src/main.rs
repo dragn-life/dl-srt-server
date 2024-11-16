@@ -17,12 +17,16 @@
  *
  */
 
+use dl_srt_server::config::Settings;
 use dl_srt_server::core::server::RelayServer;
 use dl_srt_server::monitoring::init_monitoring;
 use tokio;
 
 #[tokio::main]
 async fn main() {
+  // TODO: Implement a way to load settings from a file or via Command line Arguments
+  Settings::init(5500, 6000, 1456, 100, 20);
+
   init_monitoring();
 
   let mut server = RelayServer::new();

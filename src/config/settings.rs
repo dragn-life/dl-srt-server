@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  */
+use tokio::sync::OnceCell;
 
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -26,15 +27,31 @@ pub struct Settings {
   pub latency_ms: u32,
 }
 
-impl Default for Settings {
-  fn default() -> Self {
-    Self {
-      input_stream_port: 5500,
-      output_stream_port: 6000,
-      buffer_size: 1456, // Default SRT Buffer Size
-      max_connections: 100,
-      latency_ms: 20,
-    }
+// Static global settings
+static SETTINGS: OnceCell<Settings> = OnceCell::const_new();
+
+impl Settings {
+  pub fn init(
+    input_stream_port: u16,
+    output_stream_port: u16,
+    buffer_size: usize,
+    max_connections: usize,
+    latency_ms: u32,
+  ) {
+    let settings = Settings {
+      input_stream_port,
+      output_stream_port,
+      buffer_size,
+      max_connections,
+      latency_ms,
+    };
+    SETTINGS
+      .set(settings)
+      .expect("Settings already initialized");
+  }
+
+  pub fn get() -> &'static Settings {
+    SETTINGS.get().expect("Settings not initialized")
   }
 }
 
