@@ -16,8 +16,25 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  */
+use dl_srt_rust::SrtSocketConnection;
+use tokio::task::JoinHandle;
 
-mod stream_id;
+#[derive(Debug)]
+pub struct StreamManager {
+  incoming_stream: SrtSocketConnection,
+  outgoing_streams: Vec<SrtSocketConnection>,
+  // incoming_handle: JoinHandle<()>,
+  outgoing_handles: Vec<JoinHandle<()>>,
+}
 
-pub use stream_id::StreamId;
-pub use stream_id::StreamIdValidator;
+impl StreamManager {
+  pub fn new(incoming_stream: SrtSocketConnection) -> StreamManager {
+    StreamManager {
+      incoming_stream,
+      outgoing_streams: Vec::new(),
+      outgoing_handles: Vec::new(),
+    }
+  }
+
+  pub fn run_stream_relay(self) {}
+}

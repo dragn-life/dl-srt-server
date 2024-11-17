@@ -19,3 +19,4 @@
 
 pub mod errors;
 pub mod server;
+mod stream_manager;

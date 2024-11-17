@@ -26,4 +26,6 @@ pub enum RelayError {
   IoError(#[from] std::io::Error),
   #[error("General Error")]
   GeneralError,
+  #[error("Invalid Stream ID: {0}")]
+  InvalidStreamId(String),
 }

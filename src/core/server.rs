@@ -19,35 +19,44 @@
 
 use crate::config::Settings;
 use crate::core::errors::RelayError;
-use crate::net::connection::{ConnectionType, StreamConnection};
+use crate::core::stream_manager::StreamManager;
+use crate::net::connection::StreamConnection;
 use crate::net::listener::SrtListener;
+use crate::utils::{StreamId, StreamIdValidator};
+use dl_srt_rust::SrtSocketConnection;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, RwLock};
 use tokio::task::JoinHandle;
 
+#[derive(Clone, Debug)]
+enum ServerMessage {
+  Shutdown,
+  NewInputConnection(StreamId, SrtSocketConnection),
+  NewOutputConnection(StreamId, SrtSocketConnection),
+  DisconnectInputConnection(StreamId),
+}
+
 pub struct RelayServer {
-  shutdown_tx: broadcast::Sender<()>,
+  server_tx: Arc<broadcast::Sender<(ServerMessage)>>,
   tasks: Vec<JoinHandle<()>>,
+  stream_id_validator: Arc<RwLock<StreamIdValidator>>,
+  stream_managers: Arc<RwLock<HashMap<StreamId, Arc<StreamManager>>>>,
   // TODO: Handle blocking on tokio select for incoming and outgoing streams, tmp fix works
   srt_listeners: Vec<Arc<SrtListener>>,
-  // TODO: Build out a ConnectionsManager to link incoming streams to outgoing streams
-  incoming_stream_connections: Arc<RwLock<HashMap<String, Arc<StreamConnection>>>>,
-  outgoing_stream_connections: Arc<RwLock<HashMap<String, Arc<StreamConnection>>>>,
 }
 
 impl RelayServer {
   pub fn new() -> Self {
-    // Broadcast channel for shutdown signal
-    let (shutdown_tx, _) = broadcast::channel(1);
+    let (server_tx, _) = broadcast::channel(100);
 
-    RelayServer {
-      shutdown_tx,
+    Self {
+      server_tx: Arc::new(server_tx),
       tasks: Vec::new(),
+      stream_id_validator: Arc::new(RwLock::new(StreamIdValidator::new())),
+      stream_managers: Arc::new(RwLock::new(HashMap::new())),
       srt_listeners: Vec::new(),
-      incoming_stream_connections: Arc::new(RwLock::new(HashMap::new())),
-      outgoing_stream_connections: Arc::new(RwLock::new(HashMap::new())),
     }
   }
 
@@ -72,42 +81,79 @@ impl RelayServer {
       }
     };
 
-    let outgoing_stream_handle = match self.listen_for_output_streams() {
-      Ok(handle) => handle,
-      Err(err) => {
-        tracing::error!("Failed to start outgoing stream listener: {}", err);
-        return Err(RelayError::GeneralError);
-      }
-    };
+    // let outgoing_stream_handle = match self.listen_for_output_streams() {
+    //   Ok(handle) => handle,
+    //   Err(err) => {
+    //     tracing::error!("Failed to start outgoing stream listener: {}", err);
+    //     return Err(RelayError::GeneralError);
+    //   }
+    // };
 
-    let relay_handle = match self.start_relay_task() {
-      Ok(handle) => handle,
-      Err(err) => {
-        tracing::error!("Failed to start relay task: {}", err);
-        return Err(RelayError::GeneralError);
-      }
-    };
+    // let relay_handle = match self.start_relay_task() {
+    //   Ok(handle) => handle,
+    //   Err(err) => {
+    //     tracing::error!("Failed to start relay task: {}", err);
+    //     return Err(RelayError::GeneralError);
+    //   }
+    // };
 
     self.tasks.push(incoming_stream_handle);
-    self.tasks.push(outgoing_stream_handle);
-    self.tasks.push(relay_handle);
+    // self.tasks.push(outgoing_stream_handle);
+    // self.tasks.push(relay_handle);
 
-    tokio::select! {
-      _ = tokio::signal::ctrl_c() => {
-        tracing::info!("Shutting down server...");
-        self.shutdown_tx.send(()).expect("Failed to send shutdown signal");
-
-        // Wait for all tasks to finish
-        self.shutdown_tasks().await;
-        tracing::info!("Server shutdown complete");
-      },
+    let mut server_rx = self.server_tx.subscribe();
+    loop {
+      tokio::select! {
+        result = server_rx.recv() => {
+          match result {
+            Ok(msg) => {
+              match msg {
+                ServerMessage::Shutdown => {
+                  // Wait for all tasks to finish
+                  self.shutdown_tasks().await;
+                  tracing::info!("Server shutdown complete");
+                  break;
+                }
+                ServerMessage::NewInputConnection(stream_id, socket) => {
+                  self.add_incoming_stream(stream_id, socket);
+                }
+                _ => {}
+              }
+            }
+            Err(err) => {
+              tracing::error!("Failed to receive message: {}", err);
+            }
+          }
+        }
+      }
     }
 
     Ok(())
   }
+  // _ = tokio::signal::ctrl_c() => {
+  //   tracing::info!("Shutting down server...");
+  //   self.server_tx.send(ServerMessage::Shutdown).expect("Failed to send shutdown signal");
+  // }
+  // }
+  fn add_incoming_stream(&self, stream_id: StreamId, srt_connection: SrtSocketConnection) {
+    let stream_manager = StreamManager::new(srt_connection);
+    match self.stream_managers.try_write() {
+      Ok(mut stream_managers) => {
+        tracing::debug!("Adding to Stream Manager: {}", stream_id);
+        stream_managers.insert(stream_id, Arc::new(stream_manager));
+        tracing::debug!("Stream Managers Updated");
+      }
+      Err(err) => {
+        tracing::error!("Failed to add stream manager: {}", err);
+      }
+    };
+  }
 
   fn listen_for_input_streams(&mut self) -> Result<JoinHandle<()>, RelayError> {
-    let mut shutdown_rx = self.shutdown_tx.subscribe();
+    let server_tx = Arc::clone(&self.server_tx);
+
+    let stream_id_validator = Arc::clone(&self.stream_id_validator);
+    let stream_managers = Arc::clone(&self.stream_managers);
 
     let listener = match SrtListener::new(Settings::get().input_stream_port) {
       Ok(listener) => Arc::new(listener),
@@ -118,21 +164,26 @@ impl RelayServer {
     };
     self.srt_listeners.push(Arc::clone(&listener));
 
-    let connections = Arc::clone(&self.incoming_stream_connections);
-
     Ok(tokio::spawn(async move {
+      let mut server_rx = server_tx.subscribe();
       loop {
         tokio::select! {
-          _ = shutdown_rx.recv() => {
-            tracing::info!("Shutting down incoming stream listener...");
-
-            // Cleanup connections
-            let mut connections = connections.write().await;
-            connections.clear();
-
-            tracing::info!("Incoming stream listener shutdown complete");
-            break;
-          }
+          // result = server_rx.recv() => {
+          //   match result {
+          //     Some(msg) => match msg {
+          //     ServerMessage::Shutdown => {
+          //       tracing::info!("Shutting down incoming stream listener...");
+          //
+          //       // Cleanup connections
+          //       let mut connections = stream_managers.write().await;
+          //       connections.clear();
+          //
+          //       tracing::info!("Incoming stream listener shutdown complete");
+          //       break;
+          //     }
+          //   }
+          //     }
+          // }
           accept_result = async {
             tracing::info!("Waiting for input stream connection...");
             // TODO: Handle blocking this by running this in its own blocking thread in SrtListener
@@ -140,24 +191,44 @@ impl RelayServer {
           } => {
             match accept_result {
               Ok(socket) => {
-                match StreamConnection::new(socket, ConnectionType::InputStream) {
-                  Ok(connection) => {
-                    let connection = Arc::new(connection);
-                    let id = connection.stream_id.clone();
-
-                    tracing::info!("Incoming Stream Connected {}", connection.socket);
-
-                    {
-                      let mut connections = connections.write().await;
-                      connections.insert(id, connection);
-                    }
-                    tracing::info!("Incoming Stream Added to Map");
-                  },
+                let s_validator = match stream_id_validator.try_read() {
+                  Ok(guard) => guard,
                   Err(err) => {
-                    tracing::error!("Failed to create connection: {}", err);
+                    tracing::error!("Failed to read stream id validator: {}", err);
                     continue;
                   }
-                }
+                };
+                let stream_id = match s_validator.validate_srt_stream_id(&socket).await {
+                  Ok(stream_id) => stream_id,
+                  Err(err) => {
+                    tracing::error!("Failed to validate stream id: {}", err);
+                    continue;
+                  }
+                };
+
+                server_tx.send(ServerMessage::NewInputConnection(stream_id.clone(), socket)).expect("Failed to send new input connection message");
+                //
+                // let stream_manager = StreamManager::new(socket);
+                // add_stream_manager(Arc::clone(&stream_managers), stream_id, stream_manager);
+
+                // match StreamConnection::new(socket, ConnectionType::InputStream) {
+                //   Ok(connection) => {
+                //     let connection = Arc::new(connection);
+                //     let id = connection.stream_id.clone();
+                //
+                //     tracing::info!("Incoming Stream Connected {}", connection.socket);
+                //
+                //     {
+                //       let mut connections = connections.write().await;
+                //       connections.insert(id, connection);
+                //     }
+                //     tracing::info!("Incoming Stream Added to Map");
+                //   },
+                //   Err(err) => {
+                //     tracing::error!("Failed to create connection: {}", err);
+                //     continue;
+                //   }
+                // }
               }
               Err(err) => {
                 // TODO: False errors when shutting down
@@ -176,101 +247,101 @@ impl RelayServer {
     }))
   }
 
-  fn listen_for_output_streams(&mut self) -> Result<JoinHandle<()>, RelayError> {
-    let mut shutdown_rx = self.shutdown_tx.subscribe();
+  // fn listen_for_output_streams(&mut self) -> Result<JoinHandle<()>, RelayError> {
+  //   let mut shutdown_rx = self.shutdown_tx.subscribe();
+  //
+  //   let listener = match SrtListener::new(Settings::get().output_stream_port) {
+  //     Ok(listener) => Arc::new(listener),
+  //     Err(err) => {
+  //       tracing::error!("Failed to create listener: {}", err);
+  //       return Err(RelayError::GeneralError);
+  //     }
+  //   };
+  //
+  //   self.srt_listeners.push(Arc::clone(&listener));
+  //
+  //   let connections = Arc::clone(&self.outgoing_stream_connections);
+  //
+  //   Ok(tokio::spawn(async move {
+  //     loop {
+  //       tokio::select! {
+  //         _ = shutdown_rx.recv() => {
+  //           tracing::info!("Shutting down outgoing stream listener...");
+  //
+  //           // Cleanup connections
+  //           let mut connections = connections.write().await;
+  //           connections.clear();
+  //
+  //           tracing::info!("Outgoing stream listener shutdown complete");
+  //           break;
+  //         }
+  //         accept_result = async {
+  //           tracing::info!("Waiting for outgoing stream connection...");
+  //           listener.accept_connection()
+  //         } => {
+  //           match accept_result {
+  //             Ok(socket) => {
+  //               match StreamConnection::new(socket, ConnectionType::OutputStream) {
+  //                 Ok(connection) => {
+  //                   let connection = Arc::new(connection);
+  //                   let id = connection.stream_id.clone();
+  //
+  //                   tracing::info!("Outgoing Stream Connected {}", connection.socket);
+  //
+  //                   {
+  //                     let mut connections = connections.write().await;
+  //                     connections.insert(id, connection);
+  //                   }
+  //                   tracing::info!("Outgoing Stream Added to Map");
+  //                 },
+  //                 Err(err) => {
+  //                   tracing::error!("Failed to create connection: {}", err);
+  //                   continue;
+  //                 }
+  //               }
+  //             }
+  //             Err(err) => {
+  //               // TODO: False errors when shutting down
+  //               tracing::error!("Failed to accept connection: {}", err);
+  //
+  //               // Add a delay before retrying
+  //               tokio::time::sleep(Duration::from_secs(1)).await;
+  //               continue;
+  //             }
+  //           }
+  //         }
+  //       }
+  //     }
+  //
+  //     tracing::info!("Incoming stream listener task complete");
+  //   }))
+  // }
 
-    let listener = match SrtListener::new(Settings::get().output_stream_port) {
-      Ok(listener) => Arc::new(listener),
-      Err(err) => {
-        tracing::error!("Failed to create listener: {}", err);
-        return Err(RelayError::GeneralError);
-      }
-    };
-
-    self.srt_listeners.push(Arc::clone(&listener));
-
-    let connections = Arc::clone(&self.outgoing_stream_connections);
-
-    Ok(tokio::spawn(async move {
-      loop {
-        tokio::select! {
-          _ = shutdown_rx.recv() => {
-            tracing::info!("Shutting down outgoing stream listener...");
-
-            // Cleanup connections
-            let mut connections = connections.write().await;
-            connections.clear();
-
-            tracing::info!("Outgoing stream listener shutdown complete");
-            break;
-          }
-          accept_result = async {
-            tracing::info!("Waiting for outgoing stream connection...");
-            listener.accept_connection()
-          } => {
-            match accept_result {
-              Ok(socket) => {
-                match StreamConnection::new(socket, ConnectionType::OutputStream) {
-                  Ok(connection) => {
-                    let connection = Arc::new(connection);
-                    let id = connection.stream_id.clone();
-
-                    tracing::info!("Outgoing Stream Connected {}", connection.socket);
-
-                    {
-                      let mut connections = connections.write().await;
-                      connections.insert(id, connection);
-                    }
-                    tracing::info!("Outgoing Stream Added to Map");
-                  },
-                  Err(err) => {
-                    tracing::error!("Failed to create connection: {}", err);
-                    continue;
-                  }
-                }
-              }
-              Err(err) => {
-                // TODO: False errors when shutting down
-                tracing::error!("Failed to accept connection: {}", err);
-
-                // Add a delay before retrying
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                continue;
-              }
-            }
-          }
-        }
-      }
-
-      tracing::info!("Incoming stream listener task complete");
-    }))
-  }
-
-  fn start_relay_task(&self) -> Result<JoinHandle<()>, RelayError> {
-    tracing::info!("Starting Relay Task...");
-    let buffer_size = Settings::get().buffer_size;
-    let in_connections = Arc::clone(&self.incoming_stream_connections);
-    let out_connections = Arc::clone(&self.outgoing_stream_connections);
-    let mut shutdown_rx = self.shutdown_tx.subscribe();
-
-    Ok(tokio::spawn(async move {
-      tracing::debug!("Relay Task Spawned...");
-      loop {
-        tokio::select! {
-          Ok(_) = shutdown_rx.recv() => {
-            tracing::info!("Shutting down relay task...");
-            break;
-          }
-          _ = async {
-            handle_relay(buffer_size as i32, &in_connections, &out_connections).await;
-          } => {
-            // no-op, loop continues
-            continue;
-          }
-        }
-      }
-    }))
-  }
+  // fn start_relay_task(&self) -> Result<JoinHandle<()>, RelayError> {
+  //   tracing::info!("Starting Relay Task...");
+  //   let buffer_size = Settings::get().buffer_size;
+  //   let in_connections = Arc::clone(&self.incoming_stream_connections);
+  //   let out_connections = Arc::clone(&self.outgoing_stream_connections);
+  //   let mut shutdown_rx = self.shutdown_tx.subscribe();
+  //
+  //   Ok(tokio::spawn(async move {
+  //     tracing::debug!("Relay Task Spawned...");
+  //     loop {
+  //       tokio::select! {
+  //         Ok(_) = shutdown_rx.recv() => {
+  //           tracing::info!("Shutting down relay task...");
+  //           break;
+  //         }
+  //         _ = async {
+  //           handle_relay(buffer_size as i32, &in_connections, &out_connections).await;
+  //         } => {
+  //           // no-op, loop continues
+  //           continue;
+  //         }
+  //       }
+  //     }
+  //   }))
+  // }
 
   async fn shutdown_tasks(&mut self) {
     // Close all SRT Listner sockets
@@ -302,77 +373,77 @@ impl RelayServer {
 }
 
 // TODO: Split into separate threads per stream connection
-async fn handle_relay(
-  buffer_size: i32,
-  in_connections: &Arc<RwLock<HashMap<String, Arc<StreamConnection>>>>,
-  out_connections: &Arc<RwLock<HashMap<String, Arc<StreamConnection>>>>,
-) {
-  // let incoming_stream_connections = in_connections.read().await;
-
-  let incoming_stream;
-  {
-    // Try read for debugging deadlocks
-    let incoming_stream_connections = match in_connections.try_read() {
-      Ok(guard) => guard,
-      Err(_err) => {
-        tracing::error!("Relay Failed to read incoming connections: {}", _err);
-        return;
-      }
-    };
-
-    // Get first incoming stream
-    incoming_stream = match incoming_stream_connections.get("abc") {
-      Some(connection) => Some((connection.stream_id.clone(), Arc::clone(connection))),
-      None => None,
-    };
-  }
-  if incoming_stream.is_none() {
-    return;
-  }
-  // tracing::debug!("Incoming Stream Found...");
-  let (_, incoming_connection) = incoming_stream.unwrap();
-
-  let incoming_socket = &incoming_connection.socket;
-
-  let incoming_data = match incoming_socket.recv(buffer_size) {
-    Ok(data) => data,
-    Err(err) => {
-      // Remove incoming stream connection
-      // TODO: WIP will detect if socket is closed and remove connection
-      {
-        let mut incoming_stream_connections = in_connections.write().await;
-        incoming_stream_connections.remove(&incoming_connection.stream_id);
-      }
-      tracing::error!("Failed to receive data from incoming stream: {}", err);
-      return;
-    }
-  };
-
-  let outgoing_stream;
-  {
-    let outgoing_stream_connections = out_connections.read().await;
-    outgoing_stream = match outgoing_stream_connections.get("abc") {
-      Some(connection) => Some((connection.stream_id.clone(), Arc::clone(connection))),
-      None => None,
-    };
-  }
-
-  if outgoing_stream.is_none() {
-    return;
-  }
-  let (_, out_connection) = outgoing_stream.unwrap();
-  let outgoing_socket = &out_connection.socket;
-  match outgoing_socket.send(&incoming_data) {
-    Ok(_) => {
-      // tracing::debug!("Successful Relay");
-    }
-    Err(_err) => {
-      // TODO: WIP will detect if socket is closed and remove connection
-      {
-        let mut outgoing_stream_connections = out_connections.write().await;
-        outgoing_stream_connections.remove(&out_connection.stream_id);
-      }
-      // tracing::error!("Failed to relay data...");
-    }
-  };
-}
+// async fn handle_relay(
+//   buffer_size: i32,
+//   in_connections: &Arc<RwLock<HashMap<String, Arc<StreamConnection>>>>,
+//   out_connections: &Arc<RwLock<HashMap<String, Arc<StreamConnection>>>>,
+// ) {
+//   // let incoming_stream_connections = in_connections.read().await;
+//
+//   let incoming_stream;
+//   {
+//     // Try read for debugging deadlocks
+//     let incoming_stream_connections = match in_connections.try_read() {
+//       Ok(guard) => guard,
+//       Err(_err) => {
+//         tracing::error!("Relay Failed to read incoming connections: {}", _err);
+//         return;
+//       }
+//     };
+//
+//     // Get first incoming stream
+//     incoming_stream = match incoming_stream_connections.get("abc") {
+//       Some(connection) => Some((connection.stream_id.clone(), Arc::clone(connection))),
+//       None => None,
+//     };
+//   }
+//   if incoming_stream.is_none() {
+//     return;
+//   }
+//   // tracing::debug!("Incoming Stream Found...");
+//   let (_, incoming_connection) = incoming_stream.unwrap();
+//
+//   let incoming_socket = &incoming_connection.socket;
+//
+//   let incoming_data = match incoming_socket.recv(buffer_size) {
+//     Ok(data) => data,
+//     Err(err) => {
+//       // Remove incoming stream connection
+//       // TODO: WIP will detect if socket is closed and remove connection
+//       {
+//         let mut incoming_stream_connections = in_connections.write().await;
+//         incoming_stream_connections.remove(&incoming_connection.stream_id);
+//       }
+//       tracing::error!("Failed to receive data from incoming stream: {}", err);
+//       return;
+//     }
+//   };
+//
+//   let outgoing_stream;
+//   {
+//     let outgoing_stream_connections = out_connections.read().await;
+//     outgoing_stream = match outgoing_stream_connections.get("abc") {
+//       Some(connection) => Some((connection.stream_id.clone(), Arc::clone(connection))),
+//       None => None,
+//     };
+//   }
+//
+//   if outgoing_stream.is_none() {
+//     return;
+//   }
+//   let (_, out_connection) = outgoing_stream.unwrap();
+//   let outgoing_socket = &out_connection.socket;
+//   match outgoing_socket.send(&incoming_data) {
+//     Ok(_) => {
+//       // tracing::debug!("Successful Relay");
+//     }
+//     Err(_err) => {
+//       // TODO: WIP will detect if socket is closed and remove connection
+//       {
+//         let mut outgoing_stream_connections = out_connections.write().await;
+//         outgoing_stream_connections.remove(&out_connection.stream_id);
+//       }
+//       // tracing::error!("Failed to relay data...");
+//     }
+//   };
+// }

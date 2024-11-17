@@ -35,6 +35,7 @@ impl Display for ConnectionType {
   }
 }
 
+#[derive(Debug)]
 pub struct StreamConnection {
   pub socket: SrtSocketConnection,
   pub connection_type: ConnectionType,
